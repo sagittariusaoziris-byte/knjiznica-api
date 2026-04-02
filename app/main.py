@@ -5,6 +5,7 @@ from app.routes import books, members, loans, reservations
 from app.routes import auth as auth_router
 from app.routes import sync as sync_router
 from app.routes import recommendations as rec_router
+from app.routes import ratings as ratings_router
 
 from app.models import recommendations  # noqa
 Base.metadata.create_all(bind=engine)
@@ -30,6 +31,7 @@ app.include_router(loans.router)
 app.include_router(reservations.router)
 app.include_router(sync_router.router)
 app.include_router(rec_router.router)
+app.include_router(ratings_router.router)
 
 
 @app.on_event("startup")

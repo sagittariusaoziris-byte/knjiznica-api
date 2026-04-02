@@ -34,6 +34,7 @@ class BookOut(BookBase):
     id: int
     available_copies: int
     created_at: datetime
+    average_rating: Optional[float] = None
 
     class Config:
         from_attributes = True
@@ -112,6 +113,22 @@ class ReservationOut(BaseModel):
     is_active: bool
     book: BookOut
     member: MemberOut
+
+    class Config:
+        from_attributes = True
+
+
+# ── RATING SCHEMAS ────────────────────────────────────────────────────────────
+
+class RatingCreate(BaseModel):
+    rating: int  # 1-3
+
+class RatingOut(BaseModel):
+    id: int
+    book_id: int
+    member_id: int
+    rating: int
+    created_at: datetime
 
     class Config:
         from_attributes = True

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, Date, ForeignKey, DateTime, Text
+from sqlalchemy import Column, Integer, String, Boolean, Date, ForeignKey, DateTime, Text, Float, func
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
@@ -22,6 +22,14 @@ class Book(Base):
 
     loans = relationship("Loan", back_populates="book")
     reservations = relationship("Reservation", back_populates="book")
+    ratings = relationship("Rating", back_populates="book")
+
+    @property
+    def average_rating(self):
+        if not self.ratings:
+            return None
+        total = sum(r.rating for r in self.ratings)
+        return round(total / len(self.ratings), 1)
 
 
 class Member(Base):
@@ -40,6 +48,7 @@ class Member(Base):
 
     loans = relationship("Loan", back_populates="member")
     reservations = relationship("Reservation", back_populates="member")
+    ratings = relationship("Rating", back_populates="member")
 
 
 class Loan(Base):
@@ -71,3 +80,17 @@ class Reservation(Base):
 
     book = relationship("Book", back_populates="reservations")
     member = relationship("Member", back_populates="reservations")
+
+
+class Rating(Base):
+    __tablename__ = "ratings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    book_id = Column(Integer, ForeignKey("books.id"), nullable=False)
+    member_id = Column(Integer, ForeignKey("members.id"), nullable=False)
+    rating = Column(Integer, nullable=False)  # 1-5 stars
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    book = relationship("Book", back_populates="ratings")
+    member = relationship("Member", back_populates="ratings")
