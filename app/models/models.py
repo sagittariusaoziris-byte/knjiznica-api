@@ -17,6 +17,7 @@ class Book(Base):
     total_copies = Column(Integer, default=1)
     available_copies = Column(Integer, default=1)
     description = Column(Text, nullable=True)
+    cover_url = Column(String, nullable=True)  # URL naslovnice knjige
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     loans = relationship("Loan", back_populates="book")

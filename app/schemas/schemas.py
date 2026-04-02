@@ -14,6 +14,7 @@ class BookBase(BaseModel):
     genre: Optional[str] = None
     total_copies: int = 1
     description: Optional[str] = None
+    cover_url: Optional[str] = None
 
 class BookCreate(BookBase):
     pass
@@ -27,6 +28,7 @@ class BookUpdate(BaseModel):
     genre: Optional[str] = None
     total_copies: Optional[int] = None
     description: Optional[str] = None
+    cover_url: Optional[str] = None
 
 class BookOut(BookBase):
     id: int
