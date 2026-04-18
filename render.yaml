@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: knjiznica-api
+    env: python
+    region: frankfurt    # najbliže Balkanu (alternativa: oregon)
+    plan: free
+
+    # ── Build ──────────────────────────────────────────────────────────────────
+    buildCommand: pip install -r requirements.txt
+
+    # ── Start: migracija + uvicorn ─────────────────────────────────────────────
+    # ISPRAVKA v8.6.0: startCommand koristi app.main:app (ne app.server_main:app)
+    startCommand: >
+      alembic upgrade head &&
+      uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
+
+    # ── Environment varijable ──────────────────────────────────────────────────
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.0"
+
+      - key: WEB_CONCURRENCY
+        value: "1"
+
+      # DATABASE — Render free tier ne daje persistentni disk,
+      # pa koristimo SQLite u /tmp koji se resetira pri restartu.
+      # Za persistentnost → postavi DATABASE_URL na PostgreSQL URL.
+      - key: DATABASE_URL
+        value: "sqlite:///./library.db"
+
+      # ⚠️  OBAVEZNO postavi u Render Dashboard → Environment:
+      # Generiraj: python -c "import secrets; print(secrets.token_hex(32))"
+      - key: KNJIZNICA_SECRET_KEY
+        sync: false          # unosi se ručno u dashboard, ne commitira u git
+
+      - key: KNJIZNICA_HMAC_SECRET
+        sync: false          # HMAC za potpisivanje licencnih ključeva
+
+      # CORS — dozvoli desktop app i Flutter mobilnu
+      - key: CORS_ORIGINS
+        value: "https://knjiznica-api.onrender.com,http://localhost:8000,http://localhost:3000"
