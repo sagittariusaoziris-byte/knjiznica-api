@@ -87,7 +87,7 @@ def _run_alembic_migrations():
             # Baza postoji ali Alembic je nikad nije vidio →
             # Provjeri je li schema POTPUNO kreirana (libraries + users moraju postojati)
             with engine.connect() as check_conn:
-                has_libraries = engine.dialect.has_table(check_conn, "libraries")
+                has_libraries = engine.dialect.has_table(check_conn, "biblioteke")
                 has_users = engine.dialect.has_table(check_conn, "users")
 
             if has_libraries and has_users:

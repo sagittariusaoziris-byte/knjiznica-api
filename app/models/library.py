@@ -16,7 +16,7 @@ from app.database import Base
 
 class Library(Base):
     """Tablica knjižnica — master lista tenanata."""
-    __tablename__ = "libraries"
+    __tablename__ = "biblioteke"
 
     id           = Column(Integer, primary_key=True, index=True)
     name         = Column(String(128), nullable=False)           # "Knjižnica Bugojno"
