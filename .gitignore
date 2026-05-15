@@ -1,0 +1,47 @@
+# .gitignore za library_api
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Environment variables — NIKADA ne commitiraj .env s pravim ključevima!
+.env
+.env.local
+.env.production
+
+# Database — SQLite lokalna baza, ne commitiraj
+*.db
+*.sqlite3
+library.db
+
+# Render generira svoju bazu, ova je samo lokalna za razvoj
+/library.db
+
+# Alembic
+# (alembic/versions/*.py se commitiraju — sadrže migracije)
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logovi
+*.log
+logs/

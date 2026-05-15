@@ -1,0 +1,205 @@
+From 8ded56816b21a9c2087082f83fffe77aff518baa Mon Sep 17 00:00:00 2001
+From: sagittariusaoziris-byte <sagittarius.a.oziris@gmail.com>
+Date: Fri, 15 May 2026 19:33:49 +0000
+Subject: [PATCH] =?UTF-8?q?v9.1.5=20=E2=80=94=20books.py:=20genres/list=20?=
+ =?UTF-8?q?fix,=20Library=20FK=20provjera,=20IntegrityError->400,=20super?=
+ =?UTF-8?q?=20admin=20update/delete?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ app/routes/books.py | 102 ++++++++++++++++++++++++++++----------------
+ 1 file changed, 66 insertions(+), 36 deletions(-)
+
+diff --git a/app/routes/books.py b/app/routes/books.py
+index 5b69cab..6c29202 100644
+--- a/app/routes/books.py
++++ b/app/routes/books.py
+@@ -1,17 +1,20 @@
+ """
+ app/routes/books.py
+-VERZIJA: 9.1.4 — Paginacija (PagedResponse) na svim list endpointima
++VERZIJA: 9.1.5 — Fix: route ordering (/genres/list ispred /{book_id}),
++                  IntegrityError -> 400, Library FK provjera,
++                  super admin update/delete konzistentni s get_library_id
+ """
+-from datetime import datetime
+-from typing import Any, List, Optional
++from typing import List, Optional
+ 
+ from app.auth import get_current_user, get_library_id, require_staff
+ from app.database import get_db
++from app.models.library import Library
+ from app.models.models import Book, Loan, Member, Rating
+ from app.models.user import User
+ from app.schemas.schemas import BookCreate, BookOut, BookUpdate, PagedResponse
+ from fastapi import APIRouter, Depends, HTTPException, Query
+ from sqlalchemy import and_, func, or_
++from sqlalchemy.exc import IntegrityError
+ from sqlalchemy.orm import Session
+ 
+ router = APIRouter(prefix="/books", tags=["Knjige"])
+@@ -27,7 +30,7 @@ def _books_query(db: Session, library_id: Optional[int]):
+ 
+ @router.get("/", response_model=PagedResponse[BookOut])
+ def get_books(
+-    skip: int = Query(0, ge=0, description="Broj zapisa koje preskočiti"),
++    skip: int = Query(0, ge=0, description="Broj zapisa koje preskociti"),
+     limit: int = Query(50, ge=1, le=200, description="Maks. zapisa po stranici (max 200)"),
+     search: Optional[str] = Query(None),
+     genre: Optional[str] = None,
+@@ -60,7 +63,7 @@ def get_book_by_isbn(
+ ):
+     book = _books_query(db, library_id).filter(Book.isbn == isbn).first()
+     if not book:
+-        raise HTTPException(status_code=404, detail=f"Knjiga s ISBN {isbn} nije pronađena")
++        raise HTTPException(status_code=404, detail=f"Knjiga s ISBN {isbn} nije pronadena")
+     return book
+ 
+ 
+@@ -102,6 +105,21 @@ def advanced_search(
+     return PagedResponse.create(items=items, total=total, skip=skip, limit=limit)
+ 
+ 
++# FIX Bug1: /genres/list MORA biti registriran PRIJE /{book_id}
++# FastAPI obradjuje rute redom registracije — /{book_id} bi uhvatio
++# /genres/list i pokusao parsirati "genres" kao int -> 422 greska.
++@router.get("/genres/list")
++def get_genres(
++    library_id: Optional[int] = Depends(get_library_id),
++    db: Session = Depends(get_db)
++):
++    q = db.query(Book.genre).filter(Book.genre.isnot(None))
++    if library_id:
++        q = q.filter(Book.library_id == library_id)
++    genres = q.distinct().all()
++    return [g[0] for g in genres if g[0]]
++
++
+ @router.get("/{book_id}", response_model=BookOut)
+ def get_book(
+     book_id: int,
+@@ -110,7 +128,7 @@ def get_book(
+ ):
+     book = _books_query(db, library_id).filter(Book.id == book_id).first()
+     if not book:
+-        raise HTTPException(status_code=404, detail="Knjiga nije pronađena")
++        raise HTTPException(status_code=404, detail="Knjiga nije pronadena")
+     return book
+ 
+ 
+@@ -121,15 +139,25 @@ def create_book(
+     db: Session = Depends(get_db),
+     library_id: Optional[int] = Query(None, description="library_id za super admina"),
+ ):
+-    # Odredi u koju knjižnicu ići
++    # Odredi u koju knjižnicu ici
+     if current_user.library_id:
+-        target_library_id = current_user.library_id  # Normalni admin/knjižničar
++        target_library_id = current_user.library_id  # Normalni admin/knjiznicar
+     elif library_id:
+-        target_library_id = library_id  # Super admin proslijeđuje library_id
++        target_library_id = library_id  # Super admin prosljedjuje library_id
+     else:
+         raise HTTPException(
+             status_code=400,
+-            detail="Korisnik nije dodijeljen knjižnici. Super admin mora proslijediti ?library_id=<id>."
++            detail="Korisnik nije dodijeljen knjiznici. Super admin mora proslijediti ?library_id=<id>."
++        )
++
++    # FIX v9.1.5: Provjeri postoji li target knjiznica PRIJE db.add()
++    # Bez ove provjere, SQLAlchemy baci IntegrityError (FK violation) -> 500
++    lib = db.query(Library).filter(Library.id == target_library_id).first()
++    if not lib:
++        raise HTTPException(
++            status_code=400,
++            detail=f"Knjiznica s ID={target_library_id} ne postoji. "
++                   f"Provjerite library_id korisnika u bazi."
+         )
+ 
+     if book.isbn:
+@@ -138,17 +166,26 @@ def create_book(
+             Book.isbn == book.isbn
+         ).first()
+         if existing:
+-            raise HTTPException(status_code=400, detail=f"Knjiga s ISBN '{book.isbn}' već postoji u ovoj knjižnici")
++            raise HTTPException(
++                status_code=400,
++                detail=f"Knjiga s ISBN '{book.isbn}' vec postoji u ovoj knjiznici"
++            )
+ 
+     book_data = book.model_dump()
+-    # available_copies mora odgovarati total_copies pri kreiranju (Bug 2 fix)
+     available_copies = book_data.get("total_copies", 1) or 1
+-    db_book = Book(**book_data, library_id=target_library_id,
+-                   available_copies=available_copies)
+-    db.add(db_book)
+-    db.commit()
+-    db.refresh(db_book)
+-    return db_book
++
++    # FIX v9.1.5: try/except IntegrityError -> 400 umjesto 500
++    try:
++        db_book = Book(**book_data, library_id=target_library_id,
++                       available_copies=available_copies)
++        db.add(db_book)
++        db.commit()
++        db.refresh(db_book)
++        return db_book
++    except IntegrityError as e:
++        db.rollback()
++        detail = str(e.orig) if e.orig else str(e)
++        raise HTTPException(status_code=400, detail=f"Greška pri unosu knjige: {detail}")
+ 
+ 
+ @router.put("/{book_id}", response_model=BookOut)
+@@ -156,11 +193,14 @@ def update_book(
+     book_id: int,
+     book_update: BookUpdate,
+     current_user: User = Depends(require_staff),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    # FIX v9.1.5: current_user.library_id je None za super admina;
++    # koristimo get_library_id koji je konzistentan s GET rutama
++    library_id: Optional[int] = Depends(get_library_id),
+ ):
+-    db_book = _books_query(db, current_user.library_id).filter(Book.id == book_id).first()
++    db_book = _books_query(db, library_id).filter(Book.id == book_id).first()
+     if not db_book:
+-        raise HTTPException(status_code=404, detail="Knjiga nije pronađena")
++        raise HTTPException(status_code=404, detail="Knjiga nije pronadena")
+ 
+     for field, value in book_update.model_dump(exclude_unset=True).items():
+         setattr(db_book, field, value)
+@@ -181,22 +221,12 @@ def update_book(
+ def delete_book(
+     book_id: int,
+     current_user: User = Depends(require_staff),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    # FIX v9.1.5: konzistentno s update_book i GET rutama
++    library_id: Optional[int] = Depends(get_library_id),
+ ):
+-    db_book = _books_query(db, current_user.library_id).filter(Book.id == book_id).first()
++    db_book = _books_query(db, library_id).filter(Book.id == book_id).first()
+     if not db_book:
+-        raise HTTPException(status_code=404, detail="Knjiga nije pronađena")
++        raise HTTPException(status_code=404, detail="Knjiga nije pronadena")
+     db.delete(db_book)
+     db.commit()
+-
+-
+-@router.get("/genres/list")
+-def get_genres(
+-    library_id: Optional[int] = Depends(get_library_id),
+-    db: Session = Depends(get_db)
+-):
+-    q = db.query(Book.genre).filter(Book.genre.isnot(None))
+-    if library_id:
+-        q = q.filter(Book.library_id == library_id)
+-    genres = q.distinct().all()
+-    return [g[0] for g in genres if g[0]]
+-- 
+2.43.0
+
