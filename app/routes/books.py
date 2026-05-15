@@ -1,19 +1,18 @@
 """
 app/routes/books.py
 VERZIJA: 9.1.5 — Ispravak: redoslijed ruta (/genres/list ispred /{book_id}),
-    IntegrityError -> 400, Provjera FK knjiznice, azuriranje/brisanje konzistentno s get_library_id
+    IntegrityError -> 400, FK provjera knjiznice, average_rating SQL subquery (bez lazy load)
 """
-from datetime import datetime
-from typing import Any, List, Optional
+from typing import Optional
 
-from app.auth import get_current_user, get_library_id, require_staff
+from app.auth import get_library_id, require_staff
 from app.database import get_db
 from app.models.library import Library
-from app.models.models import Book, Loan, Member, Rating
+from app.models.models import Book, Loan, Rating
 from app.models.user import User
 from app.schemas.schemas import BookCreate, BookOut, BookUpdate, PagedResponse
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, func, or_
+from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -21,17 +20,54 @@ router = APIRouter(prefix="/books", tags=["Knjige"])
 
 
 def _books_query(db: Session, library_id: Optional[int]):
-    """Centralni query za knjige — uvijek filtrira po library_id."""
+    """Centralni query za knjige - uvijek filtrira po library_id."""
     q = db.query(Book)
     if library_id is not None:
         q = q.filter(Book.library_id == library_id)
     return q
 
 
+def _get_avg_map(db: Session, book_ids: list) -> dict:
+    """Dohvati average_rating za listu book_ids direktno SQL-om (bez lazy load)."""
+    if not book_ids:
+        return {}
+    rows = (
+        db.query(Rating.book_id, func.avg(Rating.rating).label("avg"))
+        .filter(Rating.book_id.in_(book_ids))
+        .group_by(Rating.book_id)
+        .all()
+    )
+    return {r.book_id: round(float(r.avg), 1) for r in rows}
+
+
+def _to_book_out(book: Book, avg_map: dict) -> BookOut:
+    """Konvertira Book ORM objekt u BookOut bez lazy load relacija."""
+    return BookOut(
+        id=book.id,
+        isbn=book.isbn,
+        title=book.title,
+        author=book.author,
+        publisher=book.publisher,
+        year=book.year,
+        genre=book.genre,
+        shelf=book.shelf,
+        language=book.language,
+        series=book.series,
+        series_order=book.series_order,
+        tags=book.tags,
+        total_copies=book.total_copies,
+        available_copies=book.available_copies,
+        description=book.description,
+        cover_url=book.cover_url,
+        created_at=book.created_at,
+        average_rating=avg_map.get(book.id),
+    )
+
+
 @router.get("/", response_model=PagedResponse[BookOut])
 def get_books(
-    skip: int = Query(0, ge=0, description="Broj zapisa koje preskociti"),
-    limit: int = Query(50, ge=1, le=200, description="Maks. zapisa po stranici (max 200)"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
     search: Optional[str] = Query(None),
     genre: Optional[str] = None,
     available_only: bool = False,
@@ -50,8 +86,11 @@ def get_books(
         query = query.filter(Book.genre == genre)
     if available_only:
         query = query.filter(Book.available_copies > 0)
+
     total = query.count()
-    items = query.offset(skip).limit(limit).all()
+    books = query.offset(skip).limit(limit).all()
+    avg_map = _get_avg_map(db, [b.id for b in books])
+    items = [_to_book_out(b, avg_map) for b in books]
     return PagedResponse.create(items=items, total=total, skip=skip, limit=limit)
 
 
@@ -64,7 +103,7 @@ def get_book_by_isbn(
     book = _books_query(db, library_id).filter(Book.isbn == isbn).first()
     if not book:
         raise HTTPException(status_code=404, detail=f"Knjiga s ISBN {isbn} nije pronadjena")
-    return book
+    return _to_book_out(book, _get_avg_map(db, [book.id]))
 
 
 @router.get("/search/advanced", response_model=PagedResponse[BookOut])
@@ -100,13 +139,15 @@ def advanced_search(
     if series:     query = query.filter(Book.series.ilike(f"%{series}%"))
     if tags:       query = query.filter(Book.tags.ilike(f"%{tags}%"))
     if available_only: query = query.filter(Book.available_copies > 0)
+
     total = query.count()
-    items = query.offset(skip).limit(limit).all()
+    books = query.offset(skip).limit(limit).all()
+    avg_map = _get_avg_map(db, [b.id for b in books])
+    items = [_to_book_out(b, avg_map) for b in books]
     return PagedResponse.create(items=items, total=total, skip=skip, limit=limit)
 
 
 # *** FIX v9.1.5: /genres/list MORA biti PRIJE /{book_id} ***
-# Inace FastAPI hvata "genres" kao book_id i vraca 422 gresku!
 @router.get("/genres/list")
 def get_genres(
     library_id: Optional[int] = Depends(get_library_id),
@@ -115,8 +156,7 @@ def get_genres(
     q = db.query(Book.genre).filter(Book.genre.isnot(None))
     if library_id:
         q = q.filter(Book.library_id == library_id)
-    genres = q.distinct().all()
-    return [g[0] for g in genres if g[0]]
+    return [g[0] for g in q.distinct().all() if g[0]]
 
 
 @router.get("/{book_id}", response_model=BookOut)
@@ -128,7 +168,7 @@ def get_book(
     book = _books_query(db, library_id).filter(Book.id == book_id).first()
     if not book:
         raise HTTPException(status_code=404, detail="Knjiga nije pronadjena")
-    return book
+    return _to_book_out(book, _get_avg_map(db, [book.id]))
 
 
 @router.post("/", response_model=BookOut, status_code=201)
@@ -138,24 +178,17 @@ def create_book(
     db: Session = Depends(get_db),
     library_id: Optional[int] = Query(None, description="library_id za super admina"),
 ):
-    # Odredi u koju knjizicu ici
     if current_user.library_id:
-        target_library_id = current_user.library_id  # Normalni admin/knjiznicar
+        target_library_id = current_user.library_id
     elif library_id:
-        target_library_id = library_id  # Super admin prosljeduje library_id
+        target_library_id = library_id
     else:
-        raise HTTPException(
-            status_code=400,
-            detail="Korisnik nije dodijeljen knjiznici. Super admin mora proslijediti ?library_id=<id>."
-        )
+        raise HTTPException(status_code=400,
+            detail="Korisnik nije dodijeljen knjiznici. Super admin mora proslijediti ?library_id=<id>.")
 
-    # FIX v9.1.5: Provjeri postoji li knjiznica (FK check) prije db.add()
     lib = db.query(Library).filter(Library.id == target_library_id).first()
     if not lib:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Knjiznica s ID={target_library_id} ne postoji."
-        )
+        raise HTTPException(status_code=400, detail=f"Knjiznica s ID={target_library_id} ne postoji.")
 
     if book.isbn:
         existing = db.query(Book).filter(
@@ -163,25 +196,20 @@ def create_book(
             Book.isbn == book.isbn
         ).first()
         if existing:
-            raise HTTPException(status_code=400, detail=f"Knjiga s ISBN '{book.isbn}' vec postoji u ovoj knjiznici")
+            raise HTTPException(status_code=400,
+                detail=f"Knjiga s ISBN '{book.isbn}' vec postoji u ovoj knjiznici")
 
     book_data = book.model_dump()
-    # available_copies mora odgovarati total_copies pri kreiranju (Bug 2 fix)
     available_copies = book_data.get("total_copies", 1) or 1
-    db_book = Book(**book_data, library_id=target_library_id,
-                   available_copies=available_copies)
+    db_book = Book(**book_data, library_id=target_library_id, available_copies=available_copies)
     db.add(db_book)
     try:
         db.commit()
     except IntegrityError as e:
         db.rollback()
-        # FIX v9.1.5: IntegrityError -> citljiva 400 greska umjesto 500
-        raise HTTPException(
-            status_code=400,
-            detail=f"Greska pri unosu knjige (IntegrityError): {str(e.orig)}"
-        )
+        raise HTTPException(status_code=400, detail=f"Greska pri unosu knjige: {str(e.orig)}")
     db.refresh(db_book)
-    return db_book
+    return _to_book_out(db_book, {})
 
 
 @router.put("/{book_id}", response_model=BookOut)
@@ -191,7 +219,6 @@ def update_book(
     current_user: User = Depends(require_staff),
     db: Session = Depends(get_db)
 ):
-    # FIX v9.1.5: library_id=None za super admina — moze vidjeti/editirati sve knjige
     lib_id = current_user.library_id
     db_book = _books_query(db, lib_id).filter(Book.id == book_id).first()
     if not db_book:
@@ -213,7 +240,7 @@ def update_book(
         db.rollback()
         raise HTTPException(status_code=400, detail=f"Greska pri azuriranju: {str(e.orig)}")
     db.refresh(db_book)
-    return db_book
+    return _to_book_out(db_book, _get_avg_map(db, [book_id]))
 
 
 @router.delete("/{book_id}", status_code=204)
@@ -222,7 +249,6 @@ def delete_book(
     current_user: User = Depends(require_staff),
     db: Session = Depends(get_db)
 ):
-    # FIX v9.1.5: library_id=None za super admina — moze brisati iz svih knjiznica
     lib_id = current_user.library_id
     db_book = _books_query(db, lib_id).filter(Book.id == book_id).first()
     if not db_book:
