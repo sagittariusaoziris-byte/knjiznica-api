@@ -21,7 +21,7 @@ class Book(Base):
     )
 
     id              = Column(Integer, primary_key=True, index=True)
-    library_id      = Column(Integer, ForeignKey("biblioteke.id"), nullable=False, index=True)
+    library_id      = Column(Integer, ForeignKey("libraries.id"), nullable=False, index=True)
     isbn            = Column(String,  nullable=True, index=True)
     title           = Column(String,  nullable=False, index=True)
     author          = Column(String,  nullable=False)
@@ -58,7 +58,7 @@ class Member(Base):
     )
 
     id            = Column(Integer, primary_key=True, index=True)
-    library_id    = Column(Integer, ForeignKey("biblioteke.id"), nullable=False, index=True)
+    library_id    = Column(Integer, ForeignKey("libraries.id"), nullable=False, index=True)
     member_number = Column(String,  nullable=False, index=True)
     first_name    = Column(String,  nullable=False)
     last_name     = Column(String,  nullable=False)
@@ -78,7 +78,7 @@ class Loan(Base):
     __tablename__ = "loans"
 
     id          = Column(Integer, primary_key=True, index=True)
-    library_id  = Column(Integer, ForeignKey("biblioteke.id"), nullable=False, index=True)
+    library_id  = Column(Integer, ForeignKey("libraries.id"), nullable=False, index=True)
     book_id     = Column(Integer, ForeignKey("books.id"),    nullable=False)
     member_id   = Column(Integer, ForeignKey("members.id"), nullable=False)
     loan_date   = Column(Date,    nullable=False)
@@ -97,7 +97,7 @@ class Reservation(Base):
     __tablename__ = "reservations"
 
     id          = Column(Integer, primary_key=True, index=True)
-    library_id  = Column(Integer, ForeignKey("biblioteke.id"), nullable=False, index=True)
+    library_id  = Column(Integer, ForeignKey("libraries.id"), nullable=False, index=True)
     book_id     = Column(Integer, ForeignKey("books.id"),    nullable=False)
     member_id   = Column(Integer, ForeignKey("members.id"), nullable=False)
     reserved_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -111,7 +111,7 @@ class Rating(Base):
     __tablename__ = "ratings"
 
     id         = Column(Integer, primary_key=True, index=True)
-    library_id = Column(Integer, ForeignKey("biblioteke.id"), nullable=False, index=True)
+    library_id = Column(Integer, ForeignKey("libraries.id"), nullable=False, index=True)
     book_id    = Column(Integer, ForeignKey("books.id"),    nullable=False)
     member_id  = Column(Integer, ForeignKey("members.id"), nullable=False)
     rating     = Column(Integer, nullable=False)  # 1-5

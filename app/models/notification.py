@@ -12,7 +12,7 @@ class Notification(Base):
     __tablename__ = "notifications"
 
     id         = Column(Integer, primary_key=True, index=True)
-    library_id = Column(Integer, ForeignKey("biblioteke.id"), nullable=True, index=True)
+    library_id = Column(Integer, ForeignKey("libraries.id"), nullable=True, index=True)
     type       = Column(String,  nullable=False)
     priority   = Column(String,  default="medium")
     title      = Column(String,  nullable=False)
