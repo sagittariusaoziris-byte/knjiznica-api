@@ -1,10 +1,10 @@
 """
 app/routes/books.py
-VERZIJA: 9.1.5 — Fix: route ordering (/genres/list ispred /{book_id}),
-                  IntegrityError -> 400, Library FK provjera,
-                  super admin update/delete konzistentni s get_library_id
+VERZIJA: 9.1.5 — Ispravak: redoslijed ruta (/genres/list ispred /{book_id}),
+    IntegrityError -> 400, Provjera FK knjiznice, azuriranje/brisanje konzistentno s get_library_id
 """
-from typing import List, Optional
+from datetime import datetime
+from typing import Any, List, Optional
 
 from app.auth import get_current_user, get_library_id, require_staff
 from app.database import get_db
@@ -63,7 +63,7 @@ def get_book_by_isbn(
 ):
     book = _books_query(db, library_id).filter(Book.isbn == isbn).first()
     if not book:
-        raise HTTPException(status_code=404, detail=f"Knjiga s ISBN {isbn} nije pronadena")
+        raise HTTPException(status_code=404, detail=f"Knjiga s ISBN {isbn} nije pronadjena")
     return book
 
 
@@ -105,9 +105,8 @@ def advanced_search(
     return PagedResponse.create(items=items, total=total, skip=skip, limit=limit)
 
 
-# FIX Bug1: /genres/list MORA biti registriran PRIJE /{book_id}
-# FastAPI obradjuje rute redom registracije — /{book_id} bi uhvatio
-# /genres/list i pokusao parsirati "genres" kao int -> 422 greska.
+# *** FIX v9.1.5: /genres/list MORA biti PRIJE /{book_id} ***
+# Inace FastAPI hvata "genres" kao book_id i vraca 422 gresku!
 @router.get("/genres/list")
 def get_genres(
     library_id: Optional[int] = Depends(get_library_id),
@@ -128,7 +127,7 @@ def get_book(
 ):
     book = _books_query(db, library_id).filter(Book.id == book_id).first()
     if not book:
-        raise HTTPException(status_code=404, detail="Knjiga nije pronadena")
+        raise HTTPException(status_code=404, detail="Knjiga nije pronadjena")
     return book
 
 
@@ -139,25 +138,23 @@ def create_book(
     db: Session = Depends(get_db),
     library_id: Optional[int] = Query(None, description="library_id za super admina"),
 ):
-    # Odredi u koju knjižnicu ici
+    # Odredi u koju knjizicu ici
     if current_user.library_id:
         target_library_id = current_user.library_id  # Normalni admin/knjiznicar
     elif library_id:
-        target_library_id = library_id  # Super admin prosljedjuje library_id
+        target_library_id = library_id  # Super admin prosljeduje library_id
     else:
         raise HTTPException(
             status_code=400,
             detail="Korisnik nije dodijeljen knjiznici. Super admin mora proslijediti ?library_id=<id>."
         )
 
-    # FIX v9.1.5: Provjeri postoji li target knjiznica PRIJE db.add()
-    # Bez ove provjere, SQLAlchemy baci IntegrityError (FK violation) -> 500
+    # FIX v9.1.5: Provjeri postoji li knjiznica (FK check) prije db.add()
     lib = db.query(Library).filter(Library.id == target_library_id).first()
     if not lib:
         raise HTTPException(
             status_code=400,
-            detail=f"Knjiznica s ID={target_library_id} ne postoji. "
-                   f"Provjerite library_id korisnika u bazi."
+            detail=f"Knjiznica s ID={target_library_id} ne postoji."
         )
 
     if book.isbn:
@@ -166,26 +163,25 @@ def create_book(
             Book.isbn == book.isbn
         ).first()
         if existing:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Knjiga s ISBN '{book.isbn}' vec postoji u ovoj knjiznici"
-            )
+            raise HTTPException(status_code=400, detail=f"Knjiga s ISBN '{book.isbn}' vec postoji u ovoj knjiznici")
 
     book_data = book.model_dump()
+    # available_copies mora odgovarati total_copies pri kreiranju (Bug 2 fix)
     available_copies = book_data.get("total_copies", 1) or 1
-
-    # FIX v9.1.5: try/except IntegrityError -> 400 umjesto 500
+    db_book = Book(**book_data, library_id=target_library_id,
+                   available_copies=available_copies)
+    db.add(db_book)
     try:
-        db_book = Book(**book_data, library_id=target_library_id,
-                       available_copies=available_copies)
-        db.add(db_book)
         db.commit()
-        db.refresh(db_book)
-        return db_book
     except IntegrityError as e:
         db.rollback()
-        detail = str(e.orig) if e.orig else str(e)
-        raise HTTPException(status_code=400, detail=f"Greška pri unosu knjige: {detail}")
+        # FIX v9.1.5: IntegrityError -> citljiva 400 greska umjesto 500
+        raise HTTPException(
+            status_code=400,
+            detail=f"Greska pri unosu knjige (IntegrityError): {str(e.orig)}"
+        )
+    db.refresh(db_book)
+    return db_book
 
 
 @router.put("/{book_id}", response_model=BookOut)
@@ -193,14 +189,13 @@ def update_book(
     book_id: int,
     book_update: BookUpdate,
     current_user: User = Depends(require_staff),
-    db: Session = Depends(get_db),
-    # FIX v9.1.5: current_user.library_id je None za super admina;
-    # koristimo get_library_id koji je konzistentan s GET rutama
-    library_id: Optional[int] = Depends(get_library_id),
+    db: Session = Depends(get_db)
 ):
-    db_book = _books_query(db, library_id).filter(Book.id == book_id).first()
+    # FIX v9.1.5: library_id=None za super admina — moze vidjeti/editirati sve knjige
+    lib_id = current_user.library_id
+    db_book = _books_query(db, lib_id).filter(Book.id == book_id).first()
     if not db_book:
-        raise HTTPException(status_code=404, detail="Knjiga nije pronadena")
+        raise HTTPException(status_code=404, detail="Knjiga nije pronadjena")
 
     for field, value in book_update.model_dump(exclude_unset=True).items():
         setattr(db_book, field, value)
@@ -212,7 +207,11 @@ def update_book(
         ).count()
         db_book.available_copies = max(0, book_update.total_copies - active_loans)
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Greska pri azuriranju: {str(e.orig)}")
     db.refresh(db_book)
     return db_book
 
@@ -221,12 +220,12 @@ def update_book(
 def delete_book(
     book_id: int,
     current_user: User = Depends(require_staff),
-    db: Session = Depends(get_db),
-    # FIX v9.1.5: konzistentno s update_book i GET rutama
-    library_id: Optional[int] = Depends(get_library_id),
+    db: Session = Depends(get_db)
 ):
-    db_book = _books_query(db, library_id).filter(Book.id == book_id).first()
+    # FIX v9.1.5: library_id=None za super admina — moze brisati iz svih knjiznica
+    lib_id = current_user.library_id
+    db_book = _books_query(db, lib_id).filter(Book.id == book_id).first()
     if not db_book:
-        raise HTTPException(status_code=404, detail="Knjiga nije pronadena")
+        raise HTTPException(status_code=404, detail="Knjiga nije pronadjena")
     db.delete(db_book)
     db.commit()
