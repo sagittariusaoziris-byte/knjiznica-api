@@ -17,6 +17,37 @@ from app.schemas.schemas import LoanCreate, LoanOut, LoanReturn, PagedResponse
 from app.websocket import (NotificationTypes, manager, notify_data_update,
                            notify_loan_status)
 
+
+@router.post("/debug/return/{loan_id}")
+def debug_return_loan(loan_id: int, db: Session = Depends(get_db)):
+    """Debug endpoint za return_loan bez auth"""
+    import traceback
+    try:
+        from sqlalchemy.orm import joinedload
+        loan = db.query(Loan).options(
+            joinedload(Loan.book).joinedload(Book.ratings),
+            joinedload(Loan.member)
+        ).filter(Loan.id == loan_id).first()
+        if not loan:
+            return {"ok": False, "error": "Loan not found"}
+        # Simuliraj return
+        loan.is_returned = True
+        from datetime import date
+        loan.return_date = date.today()
+        book = db.query(Book).filter(Book.id == loan.book_id).first()
+        if book:
+            book.available_copies += 1
+        db.commit()
+        # Reload
+        loan = db.query(Loan).options(
+            joinedload(Loan.book).joinedload(Book.ratings),
+            joinedload(Loan.member)
+        ).filter(Loan.id == loan_id).first()
+        return {"ok": True, "loan_id": loan.id, "is_returned": loan.is_returned}
+    except Exception as e:
+        db.rollback()
+        return {"ok": False, "error": str(e), "trace": traceback.format_exc()}
+
 router = APIRouter(prefix="/loans", tags=["Posudbe"])
 
 
