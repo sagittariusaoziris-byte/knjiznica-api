@@ -1,17 +1,18 @@
 """
 app/routes/members.py
-VERZIJA: 9.1.4 — Paginacija (PagedResponse) na list endpointu
+VERZIJA: 9.2.0 — Fix: delete_member FK zaštita + cascade brisanje
 """
 import random
 import string
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, get_library_id, require_staff
 from app.database import get_db
-from app.models.models import Member
+from app.models.models import Loan, Member, Rating, Reservation
 from app.models.user import User
 from app.schemas.schemas import MemberCreate, MemberOut, MemberUpdate, PagedResponse
 
@@ -134,32 +135,25 @@ def delete_member(
     current_user: User = Depends(require_staff),
     db: Session = Depends(get_db)
 ):
-    from app.models.models import Loan, Reservation, Rating
-    from sqlalchemy.exc import IntegrityError
-
     member = _members_query(db, current_user.library_id).filter(Member.id == member_id).first()
     if not member:
         raise HTTPException(status_code=404, detail="Član nije pronađen")
-
-    # Provjeri aktivne posudbe — član se ne može brisati dok ima aktivnih posudbi
+    # BUG-FIX: provjeri aktivne posudbe
     active_loans = db.query(Loan).filter(
-        Loan.member_id == member_id,
-        Loan.is_returned == False
+        Loan.member_id == member_id, Loan.is_returned == False
     ).count()
     if active_loans > 0:
         raise HTTPException(
             status_code=400,
-            detail=f"Član se ne može obrisati jer ima {active_loans} aktivnih posudbi."
+            detail=f"Ne možete obrisati člana koji ima {active_loans} aktivnih posudbi."
         )
-
-    # Kaskadno brisanje zavisnih zapisa
-    db.query(Rating).filter(Rating.member_id == member_id).delete(synchronize_session=False)
-    db.query(Reservation).filter(Reservation.member_id == member_id).delete(synchronize_session=False)
-    db.query(Loan).filter(Loan.member_id == member_id).delete(synchronize_session=False)
-
+    # Kaskadno briši zavisne zapise
+    db.query(Rating).filter(Rating.member_id == member_id).delete()
+    db.query(Reservation).filter(Reservation.member_id == member_id).delete()
+    db.query(Loan).filter(Loan.member_id == member_id).delete()
     try:
         db.delete(member)
         db.commit()
-    except IntegrityError as e:
+    except IntegrityError:
         db.rollback()
-        raise HTTPException(status_code=400, detail=f"Greška pri brisanju člana: {str(e.orig)}")
+        raise HTTPException(status_code=400, detail="Član se ne može obrisati zbog zavisnih zapisa.")

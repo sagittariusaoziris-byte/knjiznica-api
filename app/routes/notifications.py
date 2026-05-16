@@ -95,10 +95,10 @@ def get_notification_stats(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    from datetime import timedelta
+    from datetime import datetime, timedelta
     q = _notif_query(db, library_id, current_user.id)
-    if days is not None:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    if days:
+        cutoff = datetime.utcnow() - timedelta(days=days)
         q = q.filter(Notification.created_at >= cutoff)
     total   = q.count()
     unread  = q.filter(Notification.is_read == False).count()
@@ -120,22 +120,17 @@ def mark_read(
     return {"success": True}
 
 
+
+
+# BUG-3 FIX: Flutter šalje PUT /{id}/read — dodaj alias
 @router.put("/{notif_id}/read")
-def mark_read_put(
+def mark_read_put_alias(
     notif_id: int,
     library_id: Optional[int] = Depends(get_library_id),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Alias za Flutter klijent koji šalje PUT /{id}/read."""
-    notif = _notif_query(db, library_id).filter(Notification.id == notif_id).first()
-    if not notif:
-        raise HTTPException(status_code=404, detail="Obavijest nije pronađena")
-    notif.is_read = True
-    db.commit()
-    return {"success": True}
-
-
+    return mark_read(notif_id, library_id, current_user, db)
 @router.post("/mark-all-read")
 def mark_all_read(
     library_id: Optional[int] = Depends(get_library_id),
@@ -178,6 +173,7 @@ def delete_notification(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    # BUG-7 FIX: filtriraj po user_id da korisnik ne može brisati tuđe obavijesti
     notif = _notif_query(db, library_id, current_user.id).filter(Notification.id == notif_id).first()
     if not notif:
         raise HTTPException(status_code=404, detail="Obavijest nije pronađena")
