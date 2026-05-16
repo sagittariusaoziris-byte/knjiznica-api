@@ -50,6 +50,17 @@ class BookOut(BookBase):
         from_attributes = True
 
 
+
+
+class BookSimple(BookBase):
+    """BookOut bez average_rating - koristi se u LoanOut/ReservationOut
+    da izbjegnemo lazy load gresku na ratings relaciji."""
+    id: int
+    available_copies: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 # ── MEMBER SCHEMAS ────────────────────────────────────────────────────────────
 
 class MemberBase(BaseModel):
@@ -102,7 +113,7 @@ class LoanOut(BaseModel):
     return_date: Optional[date] = None
     is_returned: bool
     notes: Optional[str] = None
-    book: Optional[BookOut] = None
+    book: Optional[BookSimple] = None
     member: Optional[MemberOut] = None
 
     class Config:
@@ -121,7 +132,7 @@ class ReservationOut(BaseModel):
     member_id: int
     reserved_at: datetime
     is_active: bool
-    book: BookOut
+    book: BookSimple
     member: MemberOut
 
     class Config:
