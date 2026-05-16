@@ -50,9 +50,8 @@ def get_library_summary(
         extract("year",  Loan.loan_date) == today.year,
         extract("month", Loan.loan_date) == today.month,
     ).count()
-    avg_rating = db.query(func.avg(Rating.rating)).scalar()
-    if library_id:
-        avg_rating = rq.with_entities(func.avg(Rating.rating)).scalar()
+    # ISPRAVAK: bio je nefiltrirani db.query() kao fallback — brisanje curenja
+    avg_rating = rq.with_entities(func.avg(Rating.rating)).scalar()
     avg_rating = round(float(avg_rating), 2) if avg_rating else 0
 
     genre_stats = bq.with_entities(Book.genre, func.count(Book.id)).filter(

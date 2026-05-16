@@ -48,7 +48,6 @@ def get_libraries(
 ):
     """Lista knjižnica — admin vidi sve, knjižničar samo svoju."""
     if current_user.library_id:
-        # Library admin ili knjižničar vide samo svoju knjižnicu
         return db.query(Library).filter(Library.id == current_user.library_id).all()
     return db.query(Library).all()
 

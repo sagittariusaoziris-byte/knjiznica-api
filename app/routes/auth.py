@@ -3,13 +3,9 @@ app/routes/auth.py
 VERZIJA: 9.4.7 — library_id u update_user + library_name u /auth/me
 
 IZMJENE v9.4.7:
-  - update_user: PUT /auth/users/{id} sada ažurira library_id
-      * globalni admin može postaviti bilo koji library_id
-      * library admin može postaviti samo vlastiti library_id
-  - /auth/me: UserOut schema sada uključuje library_name (JOIN na libraries)
-      * Flutter/Desktop osvježavaju naziv knjižnice bez odjave
-  - /libraries/ GET: dostupan i knjiznicar ulozi (read-only)
-      * UserDialog dropdown u tab_users.py radi za sve korisnike s pristupom
+  - update_user: PUT /auth/users/{id} sada ažurira library_id (paritet s API-jem)
+  - /auth/me: UserOut schema sada uključuje library_name
+  - /libraries/ GET: dostupan i knjiznicar ulozi
 
 IZMJENE v9.2.0:
   - plain_password se enkriptira pri pohrani (Fernet, app/password_crypto.py)
@@ -68,7 +64,6 @@ class UserOut(BaseModel):
     role: UserRole
     is_active: bool
     library_id: Optional[int] = None
-    library_name: Optional[str] = None    # Uvijek vraćamo — Flutter/Desktop osvježavaju bez odjave
     plain_password: Optional[str] = None   # Dekriptirana – vidljiva samo adminu
 
     class Config:
@@ -92,13 +87,9 @@ def _get_client_ip(request: Request) -> str:
     return "unknown"
 
 
-def _user_to_out(user: User, show_password: bool, db: Session = None) -> dict:
+def _user_to_out(user: User, show_password: bool) -> dict:
     """Pretvori User u dict za response – kontrolira vidljivost lozinke."""
     plain = decrypt_password(user.plain_password) if show_password else None
-    library_name = None
-    if db and user.library_id:
-        lib = db.query(Library).filter(Library.id == user.library_id).first()
-        library_name = lib.name if lib else None
     return {
         "id": user.id,
         "username": user.username,
@@ -107,7 +98,6 @@ def _user_to_out(user: User, show_password: bool, db: Session = None) -> dict:
         "role": user.role,
         "is_active": user.is_active,
         "library_id": user.library_id,
-        "library_name": library_name,
         "plain_password": plain,
     }
 
@@ -187,8 +177,8 @@ async def login(
 
 
 @router.get("/me", response_model=UserOut)
-async def get_me(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return _user_to_out(current_user, show_password=False, db=db)
+async def get_me(current_user: User = Depends(get_current_user)):
+    return _user_to_out(current_user, show_password=False)
 
 
 @router.post("/refresh", response_model=Token)
@@ -234,7 +224,7 @@ async def get_users(
     users = q.all()
 
     show_pw = _can_see_passwords(current_user)
-    return [_user_to_out(u, show_password=show_pw, db=db) for u in users]
+    return [_user_to_out(u, show_password=show_pw) for u in users]
 
 
 @router.post("/users", status_code=201)
@@ -264,7 +254,7 @@ async def create_user(
     db.commit()
     db.refresh(user)
 
-    return _user_to_out(user, show_password=_can_see_passwords(current_user), db=db)
+    return _user_to_out(user, show_password=_can_see_passwords(current_user))
 
 
 @router.put("/users/{user_id}")
@@ -290,7 +280,7 @@ async def update_user(
     user.email     = data.email
     user.role      = data.role
 
-    # library_id: globalni admin može postaviti bilo koji, library admin samo svoju knjižnicu
+    # library_id: admin može promijeniti SAMO unutar svoje knjižnice ili je globalni admin
     if data.library_id is not None:
         if current_user.library_id and data.library_id != current_user.library_id:
             raise HTTPException(
@@ -306,7 +296,7 @@ async def update_user(
     db.commit()
     db.refresh(user)
 
-    return _user_to_out(user, show_password=_can_see_passwords(current_user), db=db)
+    return _user_to_out(user, show_password=_can_see_passwords(current_user))
 
 
 @router.delete("/users/{user_id}", status_code=204)

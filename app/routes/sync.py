@@ -106,12 +106,11 @@ async def export_all(db: Session = Depends(get_db), _=Depends(require_staff)):
 async def import_data(payload: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
     stats = {"libraries": 0, "books": 0, "members": 0, "loans": 0, "errors": []}
 
-    # ── Knjižnice (UPSERT — naziv/slug/grad se sinkronizira s Rendera) ────────
+    # ── Knjižnice (UPSERT — prima ažurirane nazive s Render API servera) ──────
     for lib in payload.get("libraries", []):
         try:
             existing = db.query(Library).filter(Library.id == lib["id"]).first()
             if existing:
-                # Sinkroniziramo naziv, slug, grad i ostala polja s Render izvora
                 for k in ("name", "slug", "city", "address", "email", "phone", "is_active", "notes"):
                     if k in lib and hasattr(existing, k):
                         setattr(existing, k, lib[k])

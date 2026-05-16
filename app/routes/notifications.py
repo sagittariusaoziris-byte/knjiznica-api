@@ -90,11 +90,16 @@ def get_notifications(
 
 @router.get("/stats")
 def get_notification_stats(
+    days: Optional[int] = None,
     library_id: Optional[int] = Depends(get_library_id),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    from datetime import timedelta
     q = _notif_query(db, library_id, current_user.id)
+    if days is not None:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        q = q.filter(Notification.created_at >= cutoff)
     total   = q.count()
     unread  = q.filter(Notification.is_read == False).count()
     return {"total": total, "unread": unread, "read": total - unread}
@@ -107,6 +112,22 @@ def mark_read(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    notif = _notif_query(db, library_id).filter(Notification.id == notif_id).first()
+    if not notif:
+        raise HTTPException(status_code=404, detail="Obavijest nije pronađena")
+    notif.is_read = True
+    db.commit()
+    return {"success": True}
+
+
+@router.put("/{notif_id}/read")
+def mark_read_put(
+    notif_id: int,
+    library_id: Optional[int] = Depends(get_library_id),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Alias za Flutter klijent koji šalje PUT /{id}/read."""
     notif = _notif_query(db, library_id).filter(Notification.id == notif_id).first()
     if not notif:
         raise HTTPException(status_code=404, detail="Obavijest nije pronađena")
@@ -154,9 +175,10 @@ def create_notification(
 def delete_notification(
     notif_id: int,
     library_id: Optional[int] = Depends(get_library_id),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    notif = _notif_query(db, library_id).filter(Notification.id == notif_id).first()
+    notif = _notif_query(db, library_id, current_user.id).filter(Notification.id == notif_id).first()
     if not notif:
         raise HTTPException(status_code=404, detail="Obavijest nije pronađena")
     db.delete(notif)

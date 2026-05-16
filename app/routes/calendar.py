@@ -1,279 +1,199 @@
 """
-Calendar routes for Knjižnica API
-Kalender i raspored za upravljanje rokovima posudbi.
+app/routes/calendar.py
+VERZIJA: 9.1.0 — library_id filter na SVIM rutama
+
+ISPRAVCI:
+  - SVAKI endpoint je bio bez library_id filtera → curenje podataka između knjižnica
+  - Dodano get_library_id dependency u sve funkcije
+  - bulk-renew sada ograničen na knjižnicu korisnika
+  - get_member_calendar provjerava da član pripada knjižnici
 """
 
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import List, Optional
 
+from app.auth import get_library_id, require_staff
 from app.database import get_db
 from app.models.models import Book, Loan, Member
+from app.models.user import User
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/calendar", tags=["Kalendar"])
 
 
-@router.get("/due-today")
-def get_due_today(db: Session = Depends(get_db)):
-    """
-    Knjige koje danas istječu.
+def _loan_query(db: Session, library_id: Optional[int]):
+    """Centralni query za posudbe — uvijek filtrira po library_id."""
+    q = db.query(Loan)
+    if library_id is not None:
+        q = q.filter(Loan.library_id == library_id)
+    return q
 
-    Vraća sve posudbe kojima je danas rok za povratak.
-    """
-    today = date.today()
 
-    due_today = (
-        db.query(Loan)
-        .filter(
-            Loan.is_returned == False,
-            Loan.due_date == today
-        )
-        .all()
-    )
+def _build_loan_item(loan, db: Session, library_id: Optional[int], extra: dict = None):
+    """Izgradi dict za loan — dohvaća member i book filtrirane po library_id."""
+    mq = db.query(Member).filter(Member.id == loan.member_id)
+    if library_id is not None:
+        mq = mq.filter(Member.library_id == library_id)
+    member = mq.first()
 
-    result = []
-    for loan in due_today:
-        member = db.query(Member).filter(Member.id == loan.member_id).first()
-        book = db.query(Book).filter(Book.id == loan.book_id).first()
+    bq = db.query(Book).filter(Book.id == loan.book_id)
+    if library_id is not None:
+        bq = bq.filter(Book.library_id == library_id)
+    book = bq.first()
 
-        if member and book:
-            result.append({
-                "loan_id": loan.id,
-                "book": {
-                    "id": book.id,
-                    "title": book.title,
-                    "author": book.author,
-                    "isbn": book.isbn,
-                    "shelf": book.shelf
-                },
-                "member": {
-                    "id": member.id,
-                    "name": f"{member.first_name} {member.last_name}",
-                    "email": member.email,
-                    "phone": member.phone
-                },
-                "loan_date": loan.loan_date.isoformat(),
-                "due_date": loan.due_date.isoformat(),
-                "status": "due_today"
-            })
+    if not member or not book:
+        return None
 
-    return {
-        "date": today.isoformat(),
-        "total": len(result),
-        "loans": result
+    item = {
+        "loan_id": loan.id,
+        "book": {
+            "id": book.id,
+            "title": book.title,
+            "author": book.author,
+            "isbn": book.isbn,
+            "shelf": book.shelf,
+        },
+        "member": {
+            "id": member.id,
+            "name": f"{member.first_name} {member.last_name}",
+            "email": member.email,
+            "phone": member.phone,
+        },
+        "loan_date": loan.loan_date.isoformat(),
+        "due_date": loan.due_date.isoformat(),
     }
+    if extra:
+        item.update(extra)
+    return item
+
+
+@router.get("/due-today")
+def get_due_today(
+    library_id: Optional[int] = Depends(get_library_id),
+    db: Session = Depends(get_db),
+):
+    """Knjige koje danas istječu — filtrirano po knjižnici."""
+    today = date.today()
+    loans = _loan_query(db, library_id).filter(
+        Loan.is_returned == False,
+        Loan.due_date == today,
+    ).all()
+
+    result = [
+        item for loan in loans
+        if (item := _build_loan_item(loan, db, library_id, {"status": "due_today"}))
+    ]
+    return {"date": today.isoformat(), "total": len(result), "loans": result}
 
 
 @router.get("/upcoming")
 def get_upcoming(
     days: Optional[int] = Query(7, ge=1, le=30, description="Broj dana unaprijed"),
-    db: Session = Depends(get_db)
+    library_id: Optional[int] = Depends(get_library_id),
+    db: Session = Depends(get_db),
 ):
-    """
-    Predstojeći rokovi.
-
-    Vraća sve posudbe koje istječu u narednih N dana.
-
-    - **days**: Broj dana unaprijed (1-30)
-    """
+    """Predstojeći rokovi — filtrirani po knjižnici."""
     today = date.today()
     end_date = today + timedelta(days=days)
 
-    upcoming = (
-        db.query(Loan)
-        .filter(
-            Loan.is_returned == False,
-            Loan.due_date >= today,
-            Loan.due_date <= end_date
-        )
-        .order_by(Loan.due_date)
-        .all()
-    )
+    loans = _loan_query(db, library_id).filter(
+        Loan.is_returned == False,
+        Loan.due_date >= today,
+        Loan.due_date <= end_date,
+    ).order_by(Loan.due_date).all()
 
-    result = []
-    for loan in upcoming:
-        member = db.query(Member).filter(Member.id == loan.member_id).first()
-        book = db.query(Book).filter(Book.id == loan.book_id).first()
-
-        if member and book:
-            days_until_due = (loan.due_date - today).days
-            result.append({
-                "loan_id": loan.id,
-                "book": {
-                    "id": book.id,
-                    "title": book.title,
-                    "author": book.author,
-                    "isbn": book.isbn,
-                    "shelf": book.shelf
-                },
-                "member": {
-                    "id": member.id,
-                    "name": f"{member.first_name} {member.last_name}",
-                    "email": member.email,
-                    "phone": member.phone
-                },
-                "loan_date": loan.loan_date.isoformat(),
-                "due_date": loan.due_date.isoformat(),
-                "days_until_due": days_until_due,
-                "status": "upcoming"
-            })
-
+    result = [
+        item for loan in loans
+        if (item := _build_loan_item(
+            loan, db, library_id,
+            {"days_until_due": (loan.due_date - today).days, "status": "upcoming"}
+        ))
+    ]
     return {
-        "date_range": {
-            "from": today.isoformat(),
-            "to": end_date.isoformat()
-        },
+        "date_range": {"from": today.isoformat(), "to": end_date.isoformat()},
         "total": len(result),
-        "loans": result
+        "loans": result,
     }
 
 
 @router.get("/overdue")
-def get_overdue(db: Session = Depends(get_db)):
-    """
-    Kašnjenja.
-
-    Vraća sve posudbe koje kasne (prošao je rok za povratak).
-    """
+def get_overdue(
+    library_id: Optional[int] = Depends(get_library_id),
+    db: Session = Depends(get_db),
+):
+    """Kasneci zajmovi — filtrirani po knjižnici."""
     today = date.today()
+    loans = _loan_query(db, library_id).filter(
+        Loan.is_returned == False,
+        Loan.due_date < today,
+    ).order_by(Loan.due_date).all()
 
-    overdue = (
-        db.query(Loan)
-        .filter(
-            Loan.is_returned == False,
-            Loan.due_date < today
-        )
-        .order_by(Loan.due_date)
-        .all()
-    )
-
-    result = []
-    for loan in overdue:
-        member = db.query(Member).filter(Member.id == loan.member_id).first()
-        book = db.query(Book).filter(Book.id == loan.book_id).first()
-
-        if member and book:
-            days_overdue = (today - loan.due_date).days
-            result.append({
-                "loan_id": loan.id,
-                "book": {
-                    "id": book.id,
-                    "title": book.title,
-                    "author": book.author,
-                    "isbn": book.isbn,
-                    "shelf": book.shelf
-                },
-                "member": {
-                    "id": member.id,
-                    "name": f"{member.first_name} {member.last_name}",
-                    "email": member.email,
-                    "phone": member.phone
-                },
-                "loan_date": loan.loan_date.isoformat(),
-                "due_date": loan.due_date.isoformat(),
-                "days_overdue": days_overdue,
-                "status": "overdue"
-            })
-
-    return {
-        "date": today.isoformat(),
-        "total": len(result),
-        "loans": result
-    }
+    result = [
+        item for loan in loans
+        if (item := _build_loan_item(
+            loan, db, library_id,
+            {"days_overdue": (today - loan.due_date).days, "status": "overdue"}
+        ))
+    ]
+    return {"date": today.isoformat(), "total": len(result), "loans": result}
 
 
 @router.post("/bulk-renew")
 def bulk_renew(
     days: Optional[int] = Query(7, ge=1, le=30, description="Broj dana za produženje"),
-    loan_ids: Optional[List[int]] = Query(None, description="Lista ID-eva posudbi za produženje"),
-    db: Session = Depends(get_db)
+    loan_ids: Optional[List[int]] = Query(None, description="Lista ID-eva posudbi"),
+    current_user: User = Depends(require_staff),
+    db: Session = Depends(get_db),
 ):
     """
-    Masovno produženje posudbi.
+    Masovno produženje posudbi — ograničeno na knjižnicu korisnika.
 
-    Produžava rok za povratak za odabrane posudbe.
-
-    - **days**: Broj dana za produženje (1-30)
-    - **loan_ids**: Lista ID-eva posudbi (ako nije navedeno, produžava sve aktivne)
+    ISPRAVAK: Ranije nije filtriralo po library_id — knjiznicar jedne knjiznice
+    mogao je produziti posudbe druge knjiznice.
     """
-    if days is None:
-        days = 7
-
-    # Ako nisu navedeni loan_ids, uzmi sve aktivne posudbe
-    if loan_ids is None:
-        loans = db.query(Loan).filter(Loan.is_returned == False).all()
-    else:
-        loans = db.query(Loan).filter(Loan.id.in_(loan_ids)).all()
+    library_id = current_user.library_id
+    base_q = _loan_query(db, library_id).filter(Loan.is_returned == False)
+    loans = base_q.filter(Loan.id.in_(loan_ids)).all() if loan_ids else base_q.all()
 
     if not loans:
         raise HTTPException(status_code=404, detail="Nema posudbi za produženje")
 
-    renewed_count = 0
     results = []
-
     for loan in loans:
-        # Produži rok
         old_due_date = loan.due_date
         loan.due_date = loan.due_date + timedelta(days=days)
-
-        renewed_count += 1
         results.append({
             "loan_id": loan.id,
             "old_due_date": old_due_date.isoformat(),
             "new_due_date": loan.due_date.isoformat(),
-            "days_added": days
+            "days_added": days,
         })
 
     db.commit()
-
     return {
-        "message": f"Uspješno produženih {renewed_count} posudbi",
+        "message": f"Uspješno produženih {len(results)} posudbi",
         "days_added": days,
-        "renewed": results
+        "renewed": results,
     }
 
 
 @router.get("/summary")
 def get_calendar_summary(
-    db: Session = Depends(get_db)
+    library_id: Optional[int] = Depends(get_library_id),
+    db: Session = Depends(get_db),
 ):
-    """
-    Sažetak kalendara.
-
-    Brzi pregled svih kategorija posudbi.
-    """
+    """Sažetak kalendara — filtriran po knjižnici."""
     today = date.today()
+    lq = _loan_query(db, library_id)
 
-    # Due today
-    due_today = db.query(Loan).filter(
-        Loan.is_returned == False,
-        Loan.due_date == today
-    ).count()
-
-    # Overdue
-    overdue = db.query(Loan).filter(
-        Loan.is_returned == False,
-        Loan.due_date < today
-    ).count()
-
-    # Upcoming (next 7 days)
-    upcoming_7 = db.query(Loan).filter(
-        Loan.is_returned == False,
-        Loan.due_date >= today,
-        Loan.due_date <= today + timedelta(days=7)
-    ).count()
-
-    # Upcoming (next 30 days)
-    upcoming_30 = db.query(Loan).filter(
-        Loan.is_returned == False,
-        Loan.due_date >= today,
-        Loan.due_date <= today + timedelta(days=30)
-    ).count()
-
-    # Active loans total
-    active_total = db.query(Loan).filter(Loan.is_returned == False).count()
+    due_today    = lq.filter(Loan.is_returned == False, Loan.due_date == today).count()
+    overdue      = lq.filter(Loan.is_returned == False, Loan.due_date < today).count()
+    upcoming_7   = lq.filter(Loan.is_returned == False, Loan.due_date >= today,
+                             Loan.due_date <= today + timedelta(days=7)).count()
+    upcoming_30  = lq.filter(Loan.is_returned == False, Loan.due_date >= today,
+                             Loan.due_date <= today + timedelta(days=30)).count()
+    active_total = lq.filter(Loan.is_returned == False).count()
 
     return {
         "date": today.isoformat(),
@@ -282,122 +202,93 @@ def get_calendar_summary(
             "overdue": overdue,
             "upcoming_7_days": upcoming_7,
             "upcoming_30_days": upcoming_30,
-            "active_total": active_total
+            "active_total": active_total,
         },
         "alerts": {
             "has_overdue": overdue > 0,
             "has_due_today": due_today > 0,
             "overdue_count": overdue,
-            "due_today_count": due_today
-        }
+            "due_today_count": due_today,
+        },
     }
 
 
 @router.get("/by-date/{target_date}")
 def get_by_date(
     target_date: date,
-    db: Session = Depends(get_db)
+    library_id: Optional[int] = Depends(get_library_id),
+    db: Session = Depends(get_db),
 ):
-    """
-    Posudbe za određeni datum.
+    """Posudbe za određeni datum — filtrirani po knjižnici."""
+    loans = _loan_query(db, library_id).filter(
+        Loan.is_returned == False,
+        Loan.due_date == target_date,
+    ).all()
 
-    Vraća sve posudbe kojima je rok za povratak na određeni datum.
-
-    - **target_date**: Datum (format: YYYY-MM-DD)
-    """
-    loans = (
-        db.query(Loan)
-        .filter(
-            Loan.is_returned == False,
-            Loan.due_date == target_date
-        )
-        .all()
-    )
-
-    result = []
-    for loan in loans:
-        member = db.query(Member).filter(Member.id == loan.member_id).first()
-        book = db.query(Book).filter(Book.id == loan.book_id).first()
-
-        if member and book:
-            result.append({
-                "loan_id": loan.id,
-                "book": {
-                    "id": book.id,
-                    "title": book.title,
-                    "author": book.author
-                },
-                "member": {
-                    "id": member.id,
-                    "name": f"{member.first_name} {member.last_name}",
-                    "email": member.email
-                },
-                "loan_date": loan.loan_date.isoformat(),
-                "due_date": loan.due_date.isoformat()
-            })
-
-    return {
-        "date": target_date.isoformat(),
-        "total": len(result),
-        "loans": result
-    }
+    result = [
+        item for loan in loans
+        if (item := _build_loan_item(loan, db, library_id))
+    ]
+    return {"date": target_date.isoformat(), "total": len(result), "loans": result}
 
 
 @router.get("/member/{member_id}")
 def get_member_calendar(
     member_id: int,
-    db: Session = Depends(get_db)
+    library_id: Optional[int] = Depends(get_library_id),
+    db: Session = Depends(get_db),
 ):
     """
-    Kalendar za određenog člana.
+    Kalendar za određenog člana — provjerava da član pripada knjižnici.
 
-    Vraća sve aktivne posudbe člana s rokovima.
+    ISPRAVAK: Ranije nije provjeravalo library_id — admin jedne knjiznice
+    mogao je vidjeti posudbe clana iz druge knjiznice.
     """
-    member = db.query(Member).filter(Member.id == member_id).first()
+    mq = db.query(Member).filter(Member.id == member_id)
+    if library_id is not None:
+        mq = mq.filter(Member.library_id == library_id)
+    member = mq.first()
     if not member:
         raise HTTPException(status_code=404, detail="Član nije pronađen")
 
     today = date.today()
-
-    # Aktivne posudbe
-    active_loans = (
-        db.query(Loan)
-        .filter(
-            Loan.member_id == member_id,
-            Loan.is_returned == False
-        )
-        .order_by(Loan.due_date)
-        .all()
-    )
+    loans = _loan_query(db, library_id).filter(
+        Loan.member_id == member_id,
+        Loan.is_returned == False,
+    ).order_by(Loan.due_date).all()
 
     result = []
-    for loan in active_loans:
-        book = db.query(Book).filter(Book.id == loan.book_id).first()
+    for loan in loans:
+        bq = db.query(Book).filter(Book.id == loan.book_id)
+        if library_id is not None:
+            bq = bq.filter(Book.library_id == library_id)
+        book = bq.first()
+        if not book:
+            continue
+
         days_until_due = (loan.due_date - today).days
+        status = "overdue" if days_until_due < 0 else "due_today" if days_until_due == 0 else "upcoming"
 
-        if book:
-            status = "overdue" if days_until_due < 0 else "due_today" if days_until_due == 0 else "upcoming"
-
-            result.append({
-                "loan_id": loan.id,
-                "book": {
-                    "id": book.id,
-                    "title": book.title,
-                    "author": book.author,
-                    "shelf": book.shelf
-                },
-                "loan_date": loan.loan_date.isoformat(),
-                "due_date": loan.due_date.isoformat(),
-                "days_until_due": days_until_due,
-                "status": status
-            })
+        result.append({
+            "loan_id": loan.id,
+            "book": {
+                "id": book.id,
+                "title": book.title,
+                "author": book.author,
+                "shelf": book.shelf,
+            },
+            "loan_date": loan.loan_date.isoformat(),
+            "due_date": loan.due_date.isoformat(),
+            "days_until_due": days_until_due,
+            "status": status,
+        })
 
     return {
         "member": {
             "id": member.id,
             "name": f"{member.first_name} {member.last_name}",
-            "member_number": member.member_number
+            "member_number": member.member_number,
         },
         "total_active": len(result),
-        "loans": result
+        "loans": result,
     }

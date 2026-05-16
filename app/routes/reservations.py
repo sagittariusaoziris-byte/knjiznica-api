@@ -88,6 +88,16 @@ def cancel_reservation(
     return reservation
 
 
+@router.patch("/{res_id}/cancel", response_model=ReservationOut)
+def cancel_reservation_patch(
+    res_id: int,
+    current_user: User = Depends(require_staff),
+    db: Session = Depends(get_db)
+):
+    """PATCH alias — Flutter klijent šalje PATCH umjesto PUT."""
+    return cancel_reservation(res_id=res_id, current_user=current_user, db=db)
+
+
 @router.delete("/{res_id}", status_code=204)
 def delete_reservation(
     res_id: int,

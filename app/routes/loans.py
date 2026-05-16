@@ -130,5 +130,12 @@ def delete_loan(
     loan = _loans_query(db, current_user.library_id).filter(Loan.id == loan_id).first()
     if not loan:
         raise HTTPException(status_code=404, detail="Posudba nije pronađena")
+
+    # Ako je posudba još aktivna, vrati primjerak knjizi prije brisanja
+    if not loan.is_returned:
+        book = db.query(Book).filter(Book.id == loan.book_id).first()
+        if book:
+            book.available_copies += 1
+
     db.delete(loan)
     db.commit()

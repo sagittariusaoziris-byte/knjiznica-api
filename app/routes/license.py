@@ -1,7 +1,7 @@
 """
-app/routes/license.py  —  v8.6.5
+app/routes/license.py  —  v8.6.8
 
-PROMJENE v8.6.5:
+PROMJENE v8.6.8:
   - NOVO: POST /admin/license/sync-from-client — retroaktivna sinkronizacija.
     Rješava slučaj: licenca aktivirana offline (server nedostupan) → DB prazan
     → admin dashboard prikazuje 0 licenci iako korisnik ima valjanu licencu.
@@ -27,10 +27,19 @@ import os
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
-from app.auth import get_current_user, require_admin, SECRET_KEY, ALGORITHM
+from app.auth import ALGORITHM, SECRET_KEY, get_current_user, require_admin
 from app.database import SessionLocal
 from app.models.license_record import LicenseRecord
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, Query, UploadFile, File
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 get_current_active_user = get_current_user
@@ -46,17 +55,31 @@ router = APIRouter(prefix="/admin/license", tags=["License Admin"])
 
 
 def _sign(payload: dict) -> str:
-    p   = {k: v for k, v in sorted(payload.items()) if k != "sig"}
+    p = {k: v for k, v in sorted(payload.items()) if k != "sig"}
     msg = json.dumps(p, separators=(",", ":"), sort_keys=True).encode()
     return hmac.new(_HMAC_SECRET, msg, hashlib.sha256).hexdigest()
 
 
-def _generate_key(email: str, days: int, machine_id: str = "", issued_date: str = None, expiry_date: str = None) -> str:
+def _generate_key(
+    email: str,
+    days: int,
+    machine_id: str = "",
+    issued_date: str = None,
+    expiry_date: str = None,
+) -> str:
     issued = issued_date or date.today().isoformat()
     expiry = expiry_date or (date.today() + timedelta(days=days)).isoformat()
-    payload = {"v": 2, "email": email, "issued": issued, "expiry": expiry, "mid": machine_id}
+    payload = {
+        "v": 2,
+        "email": email,
+        "issued": issued,
+        "expiry": expiry,
+        "mid": machine_id,
+    }
     payload["sig"] = _sign(payload)
-    return base64.b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode()
+    return base64.b64encode(
+        json.dumps(payload, separators=(",", ":")).encode()
+    ).decode()
 
 
 def _decode_key(key: str) -> dict:
@@ -74,7 +97,9 @@ def _safe_to_dict(record) -> dict | None:
             now = datetime.utcnow()
             expiry = record.expiry
             expired = expiry < now if expiry else True
-            days_remaining = max((expiry - now).days, 0) if expiry and not expired else 0
+            days_remaining = (
+                max((expiry - now).days, 0) if expiry and not expired else 0
+            )
             if not record.is_active:
                 status = "revoked"
             elif expired:
@@ -82,31 +107,31 @@ def _safe_to_dict(record) -> dict | None:
             else:
                 status = "active"
             return {
-                "id":               record.id,
-                "email":            record.email,
-                "license_key":      record.license_key,
-                "issued":           record.issued.strftime("%Y-%m-%d") if record.issued else None,
-                "expiry":           record.expiry.strftime("%Y-%m-%d") if record.expiry else None,
-                "activated_at":     None,
-                "last_seen":        None,
-                "days_remaining":   days_remaining,
-                "machine_id":       getattr(record, "machine_id", None),
-                "hostname":         getattr(record, "hostname", None),
-                "os_platform":      getattr(record, "os_platform", None),
-                "os_version":       getattr(record, "os_version", None),
-                "app_version":      getattr(record, "app_version", None),
+                "id": record.id,
+                "email": record.email,
+                "license_key": record.license_key,
+                "issued": record.issued.strftime("%Y-%m-%d") if record.issued else None,
+                "expiry": record.expiry.strftime("%Y-%m-%d") if record.expiry else None,
+                "activated_at": None,
+                "last_seen": None,
+                "days_remaining": days_remaining,
+                "machine_id": getattr(record, "machine_id", None),
+                "hostname": getattr(record, "hostname", None),
+                "os_platform": getattr(record, "os_platform", None),
+                "os_version": getattr(record, "os_version", None),
+                "app_version": getattr(record, "app_version", None),
                 "activation_count": getattr(record, "activation_count", 0) or 0,
-                "notes":            getattr(record, "notes", None),
-                "created_by":       getattr(record, "created_by", None),
-                "is_active":        record.is_active,
-                "status":           status,
+                "notes": getattr(record, "notes", None),
+                "created_by": getattr(record, "created_by", None),
+                "is_active": record.is_active,
+                "status": status,
             }
         except Exception as e:
             return None  # Ovaj red preskočiti
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# HTML nadzorna ploča — v8.6.1
+# HTML nadzorna ploča — v8.6.8
 # ─────────────────────────────────────────────────────────────────────────────
 
 DASHBOARD_HTML = """<!DOCTYPE html>
@@ -114,7 +139,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>License Manager v8.6.1</title>
+<title>License Manager v8.6.8</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Segoe UI',Arial,sans-serif;background:linear-gradient(135deg,#1a1a2e,#16213e);color:#fff;padding:20px;min-height:100vh}
@@ -257,7 +282,7 @@ input[type=file]{display:none}
       <path d="M2 10 Q18 3 34 10" stroke="#4cc9f0" stroke-width="1.2" fill="none" stroke-dasharray="2,2" opacity="0.5"/>
     </svg>
     License Manager
-    <span class="version-badge">v8.6.1</span>
+    <span class="version-badge">v8.6.8</span>
   </h1>
   <p class="sub">Knjižnica — Upravljanje licencama korisnika</p>
 </div>
@@ -781,10 +806,11 @@ document.getElementById('import-modal').addEventListener('click', function(e){ i
 # Endpoints
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @router.get("/dashboard", response_class=HTMLResponse)
 async def license_dashboard(request: Request, token: Optional[str] = Query(None)):
-    from jose import jwt, JWTError
     from app.models.user import UserRole
+    from jose import JWTError, jwt
 
     auth_token = token
     auth_header = request.headers.get("Authorization", "")
@@ -798,7 +824,9 @@ async def license_dashboard(request: Request, token: Optional[str] = Query(None)
         payload = jwt.decode(auth_token, SECRET_KEY, algorithms=[ALGORITHM])
         role = payload.get("role")
         if role != UserRole.admin:
-            raise HTTPException(status_code=403, detail="Samo admin može pristupiti dashboardu.")
+            raise HTTPException(
+                status_code=403, detail="Samo admin može pristupiti dashboardu."
+            )
     except JWTError:
         raise HTTPException(status_code=401, detail="Token neispravan ili istekao.")
 
@@ -807,31 +835,34 @@ async def license_dashboard(request: Request, token: Optional[str] = Query(None)
 
 @router.post("/generate")
 async def generate_key(
-    email:      str = Form(...),
-    days:       int = Form(365),
+    email: str = Form(...),
+    days: int = Form(365),
     machine_id: str = Form(""),
     current_user=Depends(require_admin),
 ):
-    key    = _generate_key(email, int(days), machine_id.strip())
+    key = _generate_key(email, int(days), machine_id.strip())
     expiry = datetime.now(timezone.utc) + timedelta(days=int(days))
 
     db = SessionLocal()
     try:
-        existing = db.query(LicenseRecord).filter(
-            LicenseRecord.email == email,
-            LicenseRecord.is_active == True
-        ).first()
+        existing = (
+            db.query(LicenseRecord)
+            .filter(LicenseRecord.email == email, LicenseRecord.is_active == True)
+            .first()
+        )
         if existing and not machine_id:
-            raise HTTPException(status_code=400, detail="Aktivna licenca već postoji za ovaj email.")
+            raise HTTPException(
+                status_code=400, detail="Aktivna licenca već postoji za ovaj email."
+            )
 
         record = LicenseRecord(
-            email       = email,
-            license_key = key,
-            issued      = datetime.now(timezone.utc),
-            expiry      = expiry,
-            machine_id  = machine_id.strip() or None,
-            created_by  = current_user.username,
-            is_active   = True,
+            email=email,
+            license_key=key,
+            issued=datetime.now(timezone.utc),
+            expiry=expiry,
+            machine_id=machine_id.strip() or None,
+            created_by=current_user.username,
+            is_active=True,
         )
         db.add(record)
         db.commit()
@@ -845,12 +876,12 @@ async def generate_key(
         db.close()
 
     return {
-        "key":        key,
-        "email":      email,
-        "days":       days,
+        "key": key,
+        "email": email,
+        "days": days,
         "machine_id": machine_id.strip(),
-        "expiry":     expiry.strftime("%Y-%m-%d"),
-        "record_id":  record.id,
+        "expiry": expiry.strftime("%Y-%m-%d"),
+        "record_id": record.id,
     }
 
 
@@ -862,14 +893,16 @@ async def list_licenses(current_user=Depends(require_admin)):
         # _safe_to_dict ne puca na NULL kolonama starog schemata
         data = [d for r in records if (d := _safe_to_dict(r)) is not None]
         stats = {
-            "total":   len(data),
-            "active":  sum(1 for r in data if r["status"] == "active"),
+            "total": len(data),
+            "active": sum(1 for r in data if r["status"] == "active"),
             "expired": sum(1 for r in data if r["status"] == "expired"),
             "revoked": sum(1 for r in data if r["status"] == "revoked"),
         }
         return {"records": data, "stats": stats}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Greška pri čitanju licenci: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Greška pri čitanju licenci: {str(e)}"
+        )
     finally:
         db.close()
 
@@ -878,20 +911,36 @@ async def list_licenses(current_user=Depends(require_admin)):
 async def debug_licenses(current_user=Depends(require_admin)):
     """Dijagnostika — brza provjera baze i schemata tablice."""
     from sqlalchemy import inspect as _inspect
+
     db = SessionLocal()
     try:
         insp = _inspect(db.bind)
         tables = insp.get_table_names()
-        cols = [c["name"] for c in insp.get_columns("licenses")] if "licenses" in tables else []
+        cols = (
+            [c["name"] for c in insp.get_columns("licenses")]
+            if "licenses" in tables
+            else []
+        )
         count = db.query(LicenseRecord).count() if "licenses" in tables else -1
         return {
-            "tables":         tables,
+            "tables": tables,
             "licenses_exists": "licenses" in tables,
-            "columns":        cols,
-            "record_count":   count,
-            "missing_v860":   [c for c in ["hostname","os_platform","os_version","app_version",
-                                            "activated_at","last_seen","activation_count","notes"]
-                               if c not in cols],
+            "columns": cols,
+            "record_count": count,
+            "missing_v860": [
+                c
+                for c in [
+                    "hostname",
+                    "os_platform",
+                    "os_version",
+                    "app_version",
+                    "activated_at",
+                    "last_seen",
+                    "activation_count",
+                    "notes",
+                ]
+                if c not in cols
+            ],
         }
     finally:
         db.close()
@@ -915,28 +964,32 @@ async def revoke_license(record_id: int, current_user=Depends(require_admin)):
 
 @router.post("/activate")
 async def activate_online(
-    license_key: str  = Form(...),
-    machine_id:  str  = Form(...),
-    hostname:    str  = Form(""),
-    os_platform: str  = Form(""),
-    os_version:  str  = Form(""),
-    app_version: str  = Form(""),
+    license_key: str = Form(...),
+    machine_id: str = Form(...),
+    hostname: str = Form(""),
+    os_platform: str = Form(""),
+    os_version: str = Form(""),
+    app_version: str = Form(""),
 ):
     if not machine_id or len(machine_id) < 5:
-        raise HTTPException(status_code=400, detail="Machine ID je obavezan i mora biti validan.")
+        raise HTTPException(
+            status_code=400, detail="Machine ID je obavezan i mora biti validan."
+        )
 
     key = license_key.strip()
     try:
-        raw     = base64.b64decode(key.encode()).decode()
+        raw = base64.b64decode(key.encode()).decode()
         payload = json.loads(raw)
     except Exception:
         raise HTTPException(status_code=400, detail="Neispravan format ključa.")
 
     for field in ("email", "expiry", "sig"):
         if field not in payload:
-            raise HTTPException(status_code=400, detail=f"Ključ ne sadrži polje '{field}'.")
+            raise HTTPException(
+                status_code=400, detail=f"Ključ ne sadrži polje '{field}'."
+            )
 
-    p   = {k: v for k, v in sorted(payload.items()) if k != "sig"}
+    p = {k: v for k, v in sorted(payload.items()) if k != "sig"}
     msg = json.dumps(p, separators=(",", ":"), sort_keys=True).encode()
     expected = hmac.new(_HMAC_SECRET, msg, hashlib.sha256).hexdigest()
     try:
@@ -954,45 +1007,55 @@ async def activate_online(
     except ValueError:
         raise HTTPException(status_code=400, detail="Neispravan datum isteka.")
     if expiry < date.today():
-        raise HTTPException(status_code=403, detail=f"Licenca je istekla ({payload['expiry']}).")
+        raise HTTPException(
+            status_code=403, detail=f"Licenca je istekla ({payload['expiry']})."
+        )
 
     now_utc = datetime.now(timezone.utc)
     db = SessionLocal()
     try:
-        record = db.query(LicenseRecord).filter(LicenseRecord.license_key == key).first()
+        record = (
+            db.query(LicenseRecord).filter(LicenseRecord.license_key == key).first()
+        )
 
         if record:
             if not record.is_active:
                 raise HTTPException(status_code=403, detail="Licenca je opozvana.")
             if record.machine_id and machine_id and record.machine_id != machine_id:
-                raise HTTPException(status_code=403, detail="Ključ je već aktiviran na drugom računalu.")
+                raise HTTPException(
+                    status_code=403, detail="Ključ je već aktiviran na drugom računalu."
+                )
             if machine_id and not record.machine_id:
-                record.machine_id   = machine_id
+                record.machine_id = machine_id
                 record.activated_at = now_utc
-            if hostname:    record.hostname    = hostname[:255]
-            if os_platform: record.os_platform = os_platform[:64]
-            if os_version:  record.os_version  = os_version[:128]
-            if app_version: record.app_version = app_version[:32]
-            record.last_seen        = now_utc
+            if hostname:
+                record.hostname = hostname[:255]
+            if os_platform:
+                record.os_platform = os_platform[:64]
+            if os_version:
+                record.os_version = os_version[:128]
+            if app_version:
+                record.app_version = app_version[:32]
+            record.last_seen = now_utc
             record.activation_count = (record.activation_count or 0) + 1
             db.commit()
         else:
             try:
                 new_record = LicenseRecord(
-                    email            = payload["email"],
-                    license_key      = key,
-                    issued           = now_utc,
-                    expiry           = datetime.combine(expiry, datetime.min.time()),
-                    machine_id       = machine_id.strip() or None,
-                    hostname         = hostname[:255] if hostname else None,
-                    os_platform      = os_platform[:64] if os_platform else None,
-                    os_version       = os_version[:128] if os_version else None,
-                    app_version      = app_version[:32] if app_version else None,
-                    activated_at     = now_utc,
-                    last_seen        = now_utc,
-                    activation_count = 1,
-                    created_by       = "offline_activation",
-                    is_active        = True,
+                    email=payload["email"],
+                    license_key=key,
+                    issued=now_utc,
+                    expiry=datetime.combine(expiry, datetime.min.time()),
+                    machine_id=machine_id.strip() or None,
+                    hostname=hostname[:255] if hostname else None,
+                    os_platform=os_platform[:64] if os_platform else None,
+                    os_version=os_version[:128] if os_version else None,
+                    app_version=app_version[:32] if app_version else None,
+                    activated_at=now_utc,
+                    last_seen=now_utc,
+                    activation_count=1,
+                    created_by="offline_activation",
+                    is_active=True,
                 )
                 db.add(new_record)
                 db.commit()
@@ -1000,28 +1063,39 @@ async def activate_online(
                 db.rollback()
 
         bound_key = _generate_key(
-            email=payload["email"], days=0, machine_id=machine_id,
-            issued_date=payload.get("issued"), expiry_date=payload.get("expiry")
+            email=payload["email"],
+            days=0,
+            machine_id=machine_id,
+            issued_date=payload.get("issued"),
+            expiry_date=payload.get("expiry"),
         )
-        return {"ok": True, "license_key": bound_key, "email": payload["email"], "expiry": payload["expiry"]}
+        return {
+            "ok": True,
+            "license_key": bound_key,
+            "email": payload["email"],
+            "expiry": payload["expiry"],
+        }
     finally:
         db.close()
 
 
 @router.get("/status")
 async def get_license_status(current_user=Depends(get_current_active_user)):
-    return {"message": "Koristite lokalnu provjeru licence u desktop aplikaciji.", "server": "ok"}
+    return {
+        "message": "Koristite lokalnu provjeru licence u desktop aplikaciji.",
+        "server": "ok",
+    }
 
 
 @router.post("/sync-from-client")
 async def sync_license_from_client(
     license_key: str = Form(...),
-    machine_id:  str = Form(...),
-    email:       str = Form(""),
-    expiry:      str = Form(""),
-    hostname:    str = Form(""),
+    machine_id: str = Form(...),
+    email: str = Form(""),
+    expiry: str = Form(""),
+    hostname: str = Form(""),
     os_platform: str = Form(""),
-    os_version:  str = Form(""),
+    os_version: str = Form(""),
     app_version: str = Form(""),
 ):
     """
@@ -1039,19 +1113,21 @@ async def sync_license_from_client(
     - Javna krajnja točka — autorizacija nije potrebna (nema korisnika pri pokretanju)
     """
     if not license_key or not machine_id:
-        raise HTTPException(status_code=400, detail="license_key i machine_id su obavezni.")
+        raise HTTPException(
+            status_code=400, detail="license_key i machine_id su obavezni."
+        )
 
     key = license_key.strip()
     now_utc = datetime.now(timezone.utc)
 
     # Pokušaj dekodirati ključ za email/expiry ako nisu eksplicitno poslani
     try:
-        raw     = base64.b64decode(key.encode()).decode()
+        raw = base64.b64decode(key.encode()).decode()
         payload = json.loads(raw)
-        email_from_key  = payload.get("email", email)
+        email_from_key = payload.get("email", email)
         expiry_from_key = payload.get("expiry", expiry)
     except Exception:
-        email_from_key  = email
+        email_from_key = email
         expiry_from_key = expiry
 
     if not email_from_key:
@@ -1060,34 +1136,48 @@ async def sync_license_from_client(
     db = SessionLocal()
     try:
         # 1. Traži po točnom license_key
-        record = db.query(LicenseRecord).filter(LicenseRecord.license_key == key).first()
+        record = (
+            db.query(LicenseRecord).filter(LicenseRecord.license_key == key).first()
+        )
 
         # 2. Ako nije nađen, traži po machine_id + email (ključ se mogao promijeniti — bound vs unbound)
         if not record and machine_id:
-            record = db.query(LicenseRecord).filter(
-                LicenseRecord.machine_id == machine_id,
-                LicenseRecord.email      == email_from_key,
-                LicenseRecord.is_active  == True,
-            ).first()
+            record = (
+                db.query(LicenseRecord)
+                .filter(
+                    LicenseRecord.machine_id == machine_id,
+                    LicenseRecord.email == email_from_key,
+                    LicenseRecord.is_active == True,
+                )
+                .first()
+            )
 
         # 3. Ako još uvijek nije nađen, traži samo po emailu (floating licenca, mid="" u ključu)
         if not record:
-            record = db.query(LicenseRecord).filter(
-                LicenseRecord.email     == email_from_key,
-                LicenseRecord.is_active == True,
-            ).first()
+            record = (
+                db.query(LicenseRecord)
+                .filter(
+                    LicenseRecord.email == email_from_key,
+                    LicenseRecord.is_active == True,
+                )
+                .first()
+            )
 
         if record:
             # Zapis postoji — ažuriraj machine info i last_seen
-            record.last_seen        = now_utc
+            record.last_seen = now_utc
             record.activation_count = (record.activation_count or 0) + 1
             if machine_id and not record.machine_id:
-                record.machine_id   = machine_id
+                record.machine_id = machine_id
                 record.activated_at = record.activated_at or now_utc
-            if hostname:    record.hostname    = hostname[:255]
-            if os_platform: record.os_platform = os_platform[:64]
-            if os_version:  record.os_version  = os_version[:128]
-            if app_version: record.app_version = app_version[:32]
+            if hostname:
+                record.hostname = hostname[:255]
+            if os_platform:
+                record.os_platform = os_platform[:64]
+            if os_version:
+                record.os_version = os_version[:128]
+            if app_version:
+                record.app_version = app_version[:32]
             # Ažuriraj license_key na trenutnu verziju (bound_key može biti drugačiji od originalnog)
             if key != record.license_key:
                 try:
@@ -1096,53 +1186,58 @@ async def sync_license_from_client(
                     pass  # UniqueConstraint — zanemariti ako postoji duplikat
             db.commit()
             return {
-                "ok":      True,
-                "action":  "updated",
-                "id":      record.id,
-                "email":   record.email,
+                "ok": True,
+                "action": "updated",
+                "id": record.id,
+                "email": record.email,
                 "message": "Zapis ažuriran.",
             }
         else:
             # Zapis ne postoji — retroaktivno kreiraj
             try:
-                expiry_dt = datetime.combine(
-                    date.fromisoformat(expiry_from_key),
-                    datetime.min.time()
-                ) if expiry_from_key else now_utc + timedelta(days=365)
+                expiry_dt = (
+                    datetime.combine(
+                        date.fromisoformat(expiry_from_key), datetime.min.time()
+                    )
+                    if expiry_from_key
+                    else now_utc + timedelta(days=365)
+                )
             except Exception:
                 expiry_dt = now_utc + timedelta(days=365)
 
             new_record = LicenseRecord(
-                email            = email_from_key,
-                license_key      = key,
-                issued           = now_utc,
-                expiry           = expiry_dt,
-                machine_id       = machine_id or None,
-                hostname         = hostname[:255]    if hostname    else None,
-                os_platform      = os_platform[:64]  if os_platform else None,
-                os_version       = os_version[:128]  if os_version  else None,
-                app_version      = app_version[:32]  if app_version else None,
-                activated_at     = now_utc,
-                last_seen        = now_utc,
-                activation_count = 1,
-                created_by       = "client_sync",
-                is_active        = True,
+                email=email_from_key,
+                license_key=key,
+                issued=now_utc,
+                expiry=expiry_dt,
+                machine_id=machine_id or None,
+                hostname=hostname[:255] if hostname else None,
+                os_platform=os_platform[:64] if os_platform else None,
+                os_version=os_version[:128] if os_version else None,
+                app_version=app_version[:32] if app_version else None,
+                activated_at=now_utc,
+                last_seen=now_utc,
+                activation_count=1,
+                created_by="client_sync",
+                is_active=True,
             )
             db.add(new_record)
             db.commit()
             db.refresh(new_record)
             return {
-                "ok":      True,
-                "action":  "created",
-                "id":      new_record.id,
-                "email":   new_record.email,
+                "ok": True,
+                "action": "created",
+                "id": new_record.id,
+                "email": new_record.email,
                 "message": "Zapis retroaktivno kreiran.",
             }
     except HTTPException:
         raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Greška pri sinkronizaciji: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Greška pri sinkronizaciji: {str(e)}"
+        )
     finally:
         db.close()
 
@@ -1155,14 +1250,19 @@ async def reset_machine_id(record_id: int, current_user=Depends(require_admin)):
         if not record:
             raise HTTPException(status_code=404, detail="Licenca nije pronađena.")
         old_mid = record.machine_id
-        record.machine_id   = None
-        record.hostname     = None
-        record.os_platform  = None
-        record.os_version   = None
+        record.machine_id = None
+        record.hostname = None
+        record.os_platform = None
+        record.os_version = None
         record.activated_at = None
         db.commit()
-        return {"ok": True, "id": record_id, "email": record.email, "old_mid": old_mid,
-                "message": "Machine ID resetiran. Korisnik može aktivirati ključ na novom računalu."}
+        return {
+            "ok": True,
+            "id": record_id,
+            "email": record.email,
+            "old_mid": old_mid,
+            "message": "Machine ID resetiran. Korisnik može aktivirati ključ na novom računalu.",
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -1182,7 +1282,12 @@ async def delete_license(record_id: int, current_user=Depends(require_admin)):
         email = record.email
         db.delete(record)
         db.commit()
-        return {"ok": True, "id": record_id, "email": email, "message": "Zapis trajno obrisan."}
+        return {
+            "ok": True,
+            "id": record_id,
+            "email": email,
+            "message": "Zapis trajno obrisan.",
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -1199,31 +1304,42 @@ async def init_trial(machine_id: str = Form(...)):
 
     db = SessionLocal()
     try:
-        existing = db.query(LicenseRecord).filter(
-            LicenseRecord.machine_id == machine_id,
-            LicenseRecord.created_by == "system_trial"
-        ).first()
+        existing = (
+            db.query(LicenseRecord)
+            .filter(
+                LicenseRecord.machine_id == machine_id,
+                LicenseRecord.created_by == "system_trial",
+            )
+            .first()
+        )
 
         if existing:
-            return {"ok": True, "license_key": existing.license_key,
-                    "expiry": existing.expiry.strftime("%Y-%m-%d"),
-                    "message": "Trial je već aktiviran za ovaj uređaj."}
+            return {
+                "ok": True,
+                "license_key": existing.license_key,
+                "expiry": existing.expiry.strftime("%Y-%m-%d"),
+                "message": "Trial je već aktiviran za ovaj uređaj.",
+            }
 
-        trial_email     = f"trial-{machine_id[:8]}@system"
+        trial_email = f"trial-{machine_id[:8]}@system"
         expiry_date_str = (date.today() + timedelta(days=30)).isoformat()
-        trial_key = _generate_key(trial_email, 30, machine_id, expiry_date=expiry_date_str)
+        trial_key = _generate_key(
+            trial_email, 30, machine_id, expiry_date=expiry_date_str
+        )
 
         record = LicenseRecord(
-            email            = trial_email,
-            license_key      = trial_key,
-            issued           = datetime.now(timezone.utc),
-            expiry           = datetime.combine(date.fromisoformat(expiry_date_str), datetime.min.time()),
-            machine_id       = machine_id,
-            activated_at     = datetime.now(timezone.utc),
-            last_seen        = datetime.now(timezone.utc),
-            activation_count = 1,
-            created_by       = "system_trial",
-            is_active        = True,
+            email=trial_email,
+            license_key=trial_key,
+            issued=datetime.now(timezone.utc),
+            expiry=datetime.combine(
+                date.fromisoformat(expiry_date_str), datetime.min.time()
+            ),
+            machine_id=machine_id,
+            activated_at=datetime.now(timezone.utc),
+            last_seen=datetime.now(timezone.utc),
+            activation_count=1,
+            created_by="system_trial",
+            is_active=True,
         )
         db.add(record)
         db.commit()
@@ -1233,7 +1349,9 @@ async def init_trial(machine_id: str = Form(...)):
 
 
 @router.post("/notes/{record_id}")
-async def save_notes(record_id: int, notes: str = Form(""), current_user=Depends(require_admin)):
+async def save_notes(
+    record_id: int, notes: str = Form(""), current_user=Depends(require_admin)
+):
     db = SessionLocal()
     try:
         record = db.query(LicenseRecord).filter(LicenseRecord.id == record_id).first()
@@ -1274,18 +1392,20 @@ async def import_licenses_csv(
         raise HTTPException(status_code=400, detail="Maksimalno 500 redova po uvozu.")
 
     imported = 0
-    skipped  = 0
-    errors   = 0
+    skipped = 0
+    errors = 0
 
     db = SessionLocal()
     try:
         for row in rows:
             try:
-                email  = str(row.get("email", "")).strip()
+                email = str(row.get("email", "")).strip()
                 expiry_str = str(row.get("expiry", "")).strip()[:10]
-                mid    = str(row.get("mid", "")).strip()
-                created_by = str(row.get("created_by", "csv_import")).strip() or "csv_import"
-                notes  = str(row.get("notes", "")).strip() or None
+                mid = str(row.get("mid", "")).strip()
+                created_by = (
+                    str(row.get("created_by", "csv_import")).strip() or "csv_import"
+                )
+                notes = str(row.get("notes", "")).strip() or None
 
                 if not email or not expiry_str:
                     errors += 1
@@ -1297,14 +1417,22 @@ async def import_licenses_csv(
                     continue
 
                 # Provjeri duplikat (isti email i isti expiry dan)
-                existing = db.query(LicenseRecord).filter(
-                    LicenseRecord.email == email,
-                    LicenseRecord.is_active == True,
-                ).first()
+                existing = (
+                    db.query(LicenseRecord)
+                    .filter(
+                        LicenseRecord.email == email,
+                        LicenseRecord.is_active == True,
+                    )
+                    .first()
+                )
 
                 if existing:
                     # Ako je isti expiry — pravi duplikat, preskoči
-                    ex_expiry = existing.expiry.date() if hasattr(existing.expiry, 'date') else date.fromisoformat(str(existing.expiry)[:10])
+                    ex_expiry = (
+                        existing.expiry.date()
+                        if hasattr(existing.expiry, "date")
+                        else date.fromisoformat(str(existing.expiry)[:10])
+                    )
                     if ex_expiry == expiry_date:
                         skipped += 1
                         continue
@@ -1314,14 +1442,14 @@ async def import_licenses_csv(
                 expiry_dt = datetime.combine(expiry_date, datetime.min.time())
 
                 record = LicenseRecord(
-                    email       = email,
-                    license_key = key,
-                    issued      = datetime.now(timezone.utc),
-                    expiry      = expiry_dt,
-                    machine_id  = mid or None,
-                    created_by  = created_by,
-                    notes       = notes,
-                    is_active   = True,
+                    email=email,
+                    license_key=key,
+                    issued=datetime.now(timezone.utc),
+                    expiry=expiry_dt,
+                    machine_id=mid or None,
+                    created_by=created_by,
+                    notes=notes,
+                    is_active=True,
                 )
                 db.add(record)
                 db.flush()  # provjeri UniqueConstraint
@@ -1340,18 +1468,18 @@ async def import_licenses_csv(
         db.close()
 
     return {
-        "ok":       True,
+        "ok": True,
         "imported": imported,
-        "skipped":  skipped,
-        "errors":   errors,
-        "message":  f"Uvoz završen: {imported} uvezenih, {skipped} preskočenih, {errors} grešaka.",
+        "skipped": skipped,
+        "errors": errors,
+        "message": f"Uvoz završen: {imported} uvezenih, {skipped} preskočenih, {errors} grešaka.",
     }
 
 
 @router.get("/export/csv")
 async def export_licenses_csv(request: Request, token: Optional[str] = Query(None)):
-    from jose import jwt, JWTError
     from app.models.user import UserRole
+    from jose import JWTError, jwt
 
     auth_token = token
     auth_header = request.headers.get("Authorization", "")
@@ -1370,28 +1498,56 @@ async def export_licenses_csv(request: Request, token: Optional[str] = Query(Non
     db = SessionLocal()
     try:
         records = db.query(LicenseRecord).order_by(LicenseRecord.id).all()
-        output  = io.StringIO()
-        writer  = csv.writer(output)
-        writer.writerow(["ID", "Email", "Status", "Izdano", "Istječe", "DanaPreostalo",
-                         "MachineID", "Hostname", "OS", "AppVerz", "Aktivacija",
-                         "ZadnjiKontakt", "BrojAkt", "Kreirao", "Bilješka"])
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(
+            [
+                "ID",
+                "Email",
+                "Status",
+                "Izdano",
+                "Istječe",
+                "DanaPreostalo",
+                "MachineID",
+                "Hostname",
+                "OS",
+                "AppVerz",
+                "Aktivacija",
+                "ZadnjiKontakt",
+                "BrojAkt",
+                "Kreirao",
+                "Bilješka",
+            ]
+        )
         for r in records:
             d = _safe_to_dict(r)
             if not d:
                 continue
-            writer.writerow([
-                d["id"], d["email"], d["status"], d["issued"], d["expiry"],
-                d["days_remaining"], d["machine_id"] or "", d["hostname"] or "",
-                f"{d['os_platform'] or ''} {d['os_version'] or ''}".strip(),
-                d["app_version"] or "", d["activated_at"] or "", d["last_seen"] or "",
-                d["activation_count"], d["created_by"] or "", d["notes"] or "",
-            ])
+            writer.writerow(
+                [
+                    d["id"],
+                    d["email"],
+                    d["status"],
+                    d["issued"],
+                    d["expiry"],
+                    d["days_remaining"],
+                    d["machine_id"] or "",
+                    d["hostname"] or "",
+                    f"{d['os_platform'] or ''} {d['os_version'] or ''}".strip(),
+                    d["app_version"] or "",
+                    d["activated_at"] or "",
+                    d["last_seen"] or "",
+                    d["activation_count"],
+                    d["created_by"] or "",
+                    d["notes"] or "",
+                ]
+            )
         output.seek(0)
         fname = f"licence_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
         return StreamingResponse(
             iter([output.getvalue()]),
             media_type="text/csv",
-            headers={"Content-Disposition": f"attachment; filename={fname}"}
+            headers={"Content-Disposition": f"attachment; filename={fname}"},
         )
     finally:
         db.close()

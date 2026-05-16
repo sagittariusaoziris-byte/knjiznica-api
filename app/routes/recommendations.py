@@ -96,8 +96,13 @@ async def create_recommendation(
     data: RecommendationCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_staff),
+    library_id: Optional[int] = Depends(get_library_id),
 ):
-    book = db.query(Book).filter(Book.id == data.book_id).first()
+    # ISPRAVAK: provjeri da knjiga pripada knjižnici korisnika
+    bq = db.query(Book).filter(Book.id == data.book_id)
+    if library_id is not None:
+        bq = bq.filter(Book.library_id == library_id)
+    book = bq.first()
     if not book:
         raise HTTPException(status_code=404, detail="Knjiga nije pronađena")
 
@@ -155,8 +160,21 @@ async def toggle_bookmark(
     data: BookmarkCreate,
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
+    library_id: Optional[int] = Depends(get_library_id),
 ):
     """Dodaj bookmark ili ga ukloni ako već postoji (toggle)."""
+    # ISPRAVAK: provjeri da knjiga i član pripadaju knjižnici
+    bq = db.query(Book).filter(Book.id == data.book_id)
+    if library_id is not None:
+        bq = bq.filter(Book.library_id == library_id)
+    if not bq.first():
+        raise HTTPException(status_code=404, detail="Knjiga nije pronađena")
+
+    mq = db.query(Member).filter(Member.id == data.member_id)
+    if library_id is not None:
+        mq = mq.filter(Member.library_id == library_id)
+    if not mq.first():
+        raise HTTPException(status_code=404, detail="Član nije pronađen")
     existing = db.query(MemberBookmark).filter(
         MemberBookmark.book_id == data.book_id,
         MemberBookmark.member_id == data.member_id,
@@ -219,12 +237,20 @@ async def create_request(
     data: RequestCreate,
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
+    library_id: Optional[int] = Depends(get_library_id),
 ):
-    book = db.query(Book).filter(Book.id == data.book_id).first()
+    # ISPRAVAK: provjeri da knjiga i član pripadaju knjižnici
+    bq = db.query(Book).filter(Book.id == data.book_id)
+    if library_id is not None:
+        bq = bq.filter(Book.library_id == library_id)
+    book = bq.first()
     if not book:
         raise HTTPException(status_code=404, detail="Knjiga nije pronađena")
 
-    member = db.query(Member).filter(Member.id == data.member_id).first()
+    mq = db.query(Member).filter(Member.id == data.member_id)
+    if library_id is not None:
+        mq = mq.filter(Member.library_id == library_id)
+    member = mq.first()
     if not member:
         raise HTTPException(status_code=404, detail="Član nije pronađen")
 

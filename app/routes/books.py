@@ -249,9 +249,31 @@ def delete_book(
     current_user: User = Depends(require_staff),
     db: Session = Depends(get_db)
 ):
+    from app.models.models import Reservation, Rating
     lib_id = current_user.library_id
     db_book = _books_query(db, lib_id).filter(Book.id == book_id).first()
     if not db_book:
         raise HTTPException(status_code=404, detail="Knjiga nije pronadjena")
-    db.delete(db_book)
-    db.commit()
+
+    # Provjeri aktivne posudbe — ne smije se brisati dok je knjiga posuđena
+    active_loans = db.query(Loan).filter(
+        Loan.book_id == book_id,
+        Loan.is_returned == False
+    ).count()
+    if active_loans > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Knjiga se ne može obrisati jer ima {active_loans} aktivnih posudbi."
+        )
+
+    # Kaskadno brisanje zavisnih zapisa
+    db.query(Rating).filter(Rating.book_id == book_id).delete(synchronize_session=False)
+    db.query(Reservation).filter(Reservation.book_id == book_id).delete(synchronize_session=False)
+    db.query(Loan).filter(Loan.book_id == book_id).delete(synchronize_session=False)
+
+    try:
+        db.delete(db_book)
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Greška pri brisanju knjige: {str(e.orig)}")

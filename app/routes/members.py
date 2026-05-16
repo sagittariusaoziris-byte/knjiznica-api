@@ -134,8 +134,32 @@ def delete_member(
     current_user: User = Depends(require_staff),
     db: Session = Depends(get_db)
 ):
+    from app.models.models import Loan, Reservation, Rating
+    from sqlalchemy.exc import IntegrityError
+
     member = _members_query(db, current_user.library_id).filter(Member.id == member_id).first()
     if not member:
         raise HTTPException(status_code=404, detail="Član nije pronađen")
-    db.delete(member)
-    db.commit()
+
+    # Provjeri aktivne posudbe — član se ne može brisati dok ima aktivnih posudbi
+    active_loans = db.query(Loan).filter(
+        Loan.member_id == member_id,
+        Loan.is_returned == False
+    ).count()
+    if active_loans > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Član se ne može obrisati jer ima {active_loans} aktivnih posudbi."
+        )
+
+    # Kaskadno brisanje zavisnih zapisa
+    db.query(Rating).filter(Rating.member_id == member_id).delete(synchronize_session=False)
+    db.query(Reservation).filter(Reservation.member_id == member_id).delete(synchronize_session=False)
+    db.query(Loan).filter(Loan.member_id == member_id).delete(synchronize_session=False)
+
+    try:
+        db.delete(member)
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Greška pri brisanju člana: {str(e.orig)}")
