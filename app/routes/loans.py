@@ -44,7 +44,11 @@ def get_loans(
     if active_only:  query = query.filter(Loan.is_returned == False)
     if overdue_only: query = query.filter(Loan.is_returned == False, Loan.due_date < date.today())
     total = query.count()
-    items = query.offset(skip).limit(limit).all()
+    from sqlalchemy.orm import joinedload
+    items = query.options(
+        joinedload(Loan.book).joinedload(Book.ratings),
+        joinedload(Loan.member)
+    ).offset(skip).limit(limit).all()
     return PagedResponse.create(items=items, total=total, skip=skip, limit=limit)
 
 
@@ -54,7 +58,11 @@ def get_loan(
     library_id: Optional[int] = Depends(get_library_id),
     db: Session = Depends(get_db)
 ):
-    loan = _loans_query(db, library_id).filter(Loan.id == loan_id).first()
+    from sqlalchemy.orm import joinedload
+    loan = _loans_query(db, library_id).options(
+        joinedload(Loan.book).joinedload(Book.ratings),
+        joinedload(Loan.member)
+    ).filter(Loan.id == loan_id).first()
     if not loan:
         raise HTTPException(status_code=404, detail="Posudba nije pronađena")
     return loan
@@ -116,7 +124,12 @@ async def return_loan(
         book.available_copies += 1
 
     db.commit()
-    db.refresh(loan)
+    # FIX: joinedload da izbjegnemo lazy load 500 pri serijalizaciji BookOut
+    from sqlalchemy.orm import joinedload
+    loan = db.query(Loan).options(
+        joinedload(Loan.book).joinedload(Book.ratings),
+        joinedload(Loan.member)
+    ).filter(Loan.id == loan_id).first()
     asyncio.create_task(notify_data_update("loan", "returned", {"loan_id": loan.id}))
     return loan
 
