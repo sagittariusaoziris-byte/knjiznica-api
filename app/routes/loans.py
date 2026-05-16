@@ -19,7 +19,7 @@ from app.websocket import (NotificationTypes, manager, notify_data_update,
 
 router = APIRouter(prefix="/loans", tags=["Posudbe"])
 
-@router.post("/debug/return/{loan_id}")
+@router.get("/debug/return/{loan_id}")
 def debug_return_loan(loan_id: int, db: Session = Depends(get_db)):
     """Debug endpoint za return_loan bez auth"""
     import traceback
