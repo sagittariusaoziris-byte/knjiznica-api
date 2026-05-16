@@ -17,6 +17,7 @@ from app.schemas.schemas import LoanCreate, LoanOut, LoanReturn, PagedResponse
 from app.websocket import (NotificationTypes, manager, notify_data_update,
                            notify_loan_status)
 
+router = APIRouter(prefix="/loans", tags=["Posudbe"])
 
 @router.post("/debug/return/{loan_id}")
 def debug_return_loan(loan_id: int, db: Session = Depends(get_db)):
@@ -30,7 +31,6 @@ def debug_return_loan(loan_id: int, db: Session = Depends(get_db)):
         ).filter(Loan.id == loan_id).first()
         if not loan:
             return {"ok": False, "error": "Loan not found"}
-        # Simuliraj return
         loan.is_returned = True
         from datetime import date
         loan.return_date = date.today()
@@ -38,7 +38,6 @@ def debug_return_loan(loan_id: int, db: Session = Depends(get_db)):
         if book:
             book.available_copies += 1
         db.commit()
-        # Reload
         loan = db.query(Loan).options(
             joinedload(Loan.book).joinedload(Book.ratings),
             joinedload(Loan.member)
@@ -47,8 +46,6 @@ def debug_return_loan(loan_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         return {"ok": False, "error": str(e), "trace": traceback.format_exc()}
-
-router = APIRouter(prefix="/loans", tags=["Posudbe"])
 
 
 def _loans_query(db: Session, library_id: Optional[int]):
