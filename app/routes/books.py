@@ -7,7 +7,7 @@ from typing import List, Optional
 from app.auth import get_current_user, get_library_id, require_staff
 from app.database import get_db
 from app.models.library import Library
-from app.models.models import Book, Loan, Member, Rating
+from app.models.models import Book, Loan, Member, Rating, Reservation
 from app.models.user import User
 from app.schemas.schemas import BookCreate, BookOut, BookUpdate, PagedResponse
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -227,7 +227,6 @@ def delete_book(
     if not db_book:
         raise HTTPException(status_code=404, detail="Knjiga nije pronađena")
     # BUG-FIX: kaskadno briši zavisne zapise prije brisanja knjige
-    from app.models.models import Loan, Rating, Reservation
     active_loans = db.query(Loan).filter(
         Loan.book_id == book_id, Loan.is_returned == False
     ).count()
