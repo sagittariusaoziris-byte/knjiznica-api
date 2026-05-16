@@ -91,7 +91,7 @@ class LoanCreate(BaseModel):
     notes: Optional[str] = None
 
 class LoanReturn(BaseModel):
-    return_date: date
+    return_date: Optional[date] = None
 
 class LoanOut(BaseModel):
     id: int
