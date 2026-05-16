@@ -19,6 +19,28 @@ from app.websocket import (NotificationTypes, manager, notify_data_update,
 
 router = APIRouter(prefix="/loans", tags=["Posudbe"])
 
+@router.get("/debug/list")
+def debug_loans_list(db: Session = Depends(get_db)):
+    """Debug - bez auth, hvata tocnu gresku"""
+    import traceback
+    try:
+        from sqlalchemy.orm import joinedload
+        items = db.query(Loan).options(
+            joinedload(Loan.book),
+            joinedload(Loan.member)
+        ).filter(Loan.library_id == 1).limit(3).all()
+        result = []
+        for loan in items:
+            try:
+                from app.schemas.schemas import LoanOut
+                d = LoanOut.model_validate(loan)
+                result.append({"id": loan.id, "ok": True})
+            except Exception as e:
+                result.append({"id": loan.id, "error": str(e), "trace": traceback.format_exc()})
+        return {"count": len(result), "items": result}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "trace": traceback.format_exc()}
+
 
 def _loans_query(db: Session, library_id: Optional[int]):
     q = db.query(Loan)
