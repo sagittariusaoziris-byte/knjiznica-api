@@ -124,14 +124,9 @@ async def return_loan(
         book.available_copies += 1
 
     db.commit()
-    # FIX: joinedload da izbjegnemo lazy load 500 pri serijalizaciji BookOut
-    from sqlalchemy.orm import joinedload
-    loan = db.query(Loan).options(
-        joinedload(Loan.book).joinedload(Book.ratings),
-        joinedload(Loan.member)
-    ).filter(Loan.id == loan_id).first()
-    asyncio.create_task(notify_data_update("loan", "returned", {"loan_id": loan.id}))
-    return loan
+    asyncio.create_task(notify_data_update("loan", "returned", {"loan_id": loan_id}))
+    # FIX: vraćamo samo potvrdu umjesto cijelog LoanOut (izbjegava lazy load 500)
+    return {"id": loan_id, "is_returned": True}
 
 
 @router.delete("/{loan_id}", status_code=204)
