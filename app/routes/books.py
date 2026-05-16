@@ -18,11 +18,8 @@ from sqlalchemy.orm import Session
 router = APIRouter(prefix="/books", tags=["Knjige"])
 
 @router.get("/debug/test")
-def debug_books(
-    db: Session = Depends(get_db),
-    library_id: Optional[int] = Depends(get_library_id),
-):
-    """Debug endpoint - vraca stvarnu grešku umjesto 500"""
+def debug_books(db: Session = Depends(get_db)):
+    """Debug endpoint - bez auth, vraca stvarnu grešku"""
     import traceback
     try:
         from sqlalchemy.orm import joinedload
@@ -36,7 +33,7 @@ def debug_books(
                 result.append({"id": b.id, "title": b.title, "avg": avg})
             except Exception as e:
                 result.append({"id": b.id, "error": str(e), "trace": traceback.format_exc()})
-        return {"ok": True, "items": result}
+        return {"ok": True, "items": result, "count": len(result)}
     except Exception as e:
         return {"ok": False, "error": str(e), "trace": traceback.format_exc()}
 
