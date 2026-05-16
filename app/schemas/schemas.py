@@ -53,8 +53,8 @@ class BookOut(BookBase):
 
 
 class BookSimple(BookBase):
-    """BookOut bez average_rating - koristi se u LoanOut/ReservationOut
-    da izbjegnemo lazy load gresku na ratings relaciji."""
+    """Jednostavna verzija BookOut bez average_rating.
+    Koristi se u LoanOut/ReservationOut da izbjegnemo lazy load 500."""
     id: int
     available_copies: int
     created_at: datetime
