@@ -266,10 +266,14 @@ def delete_book(
             detail=f"Knjiga se ne može obrisati jer ima {active_loans} aktivnih posudbi."
         )
 
-    # Kaskadno brisanje zavisnih zapisa
+    # Kaskadno brisanje SVIH zavisnih zapisa (sve tablice s book_id FK)
+    from app.models.recommendations import BookRecommendation, MemberBookmark, ReservationRequest
     db.query(Rating).filter(Rating.book_id == book_id).delete(synchronize_session=False)
     db.query(Reservation).filter(Reservation.book_id == book_id).delete(synchronize_session=False)
     db.query(Loan).filter(Loan.book_id == book_id).delete(synchronize_session=False)
+    db.query(BookRecommendation).filter(BookRecommendation.book_id == book_id).delete(synchronize_session=False)
+    db.query(MemberBookmark).filter(MemberBookmark.book_id == book_id).delete(synchronize_session=False)
+    db.query(ReservationRequest).filter(ReservationRequest.book_id == book_id).delete(synchronize_session=False)
 
     try:
         db.delete(db_book)
