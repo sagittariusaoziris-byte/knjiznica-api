@@ -50,17 +50,6 @@ class BookOut(BookBase):
         from_attributes = True
 
 
-
-
-class BookSimple(BookBase):
-    """Jednostavna verzija BookOut bez average_rating.
-    Koristi se u LoanOut/ReservationOut da izbjegnemo lazy load 500."""
-    id: int
-    available_copies: int
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
 # ── MEMBER SCHEMAS ────────────────────────────────────────────────────────────
 
 class MemberBase(BaseModel):
@@ -102,8 +91,7 @@ class LoanCreate(BaseModel):
     notes: Optional[str] = None
 
 class LoanReturn(BaseModel):
-    return_date: Optional[date] = None
-    notes: Optional[str] = None  # FIX v9.3.0: dodan notes field koji je bio korišten u loans.py ali nije bio definiran
+    return_date: date
 
 class LoanOut(BaseModel):
     id: int
@@ -114,7 +102,7 @@ class LoanOut(BaseModel):
     return_date: Optional[date] = None
     is_returned: bool
     notes: Optional[str] = None
-    book: Optional[BookSimple] = None
+    book: Optional[BookOut] = None
     member: Optional[MemberOut] = None
 
     class Config:
@@ -133,7 +121,7 @@ class ReservationOut(BaseModel):
     member_id: int
     reserved_at: datetime
     is_active: bool
-    book: BookSimple
+    book: BookOut
     member: MemberOut
 
     class Config:

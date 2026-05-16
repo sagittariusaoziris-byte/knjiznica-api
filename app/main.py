@@ -169,7 +169,7 @@ def _seed_libraries_and_users(db):
             ))
 
     db.commit()
-    print("✓ Knjižnice i korisnici inicijalizirani (v9.4.6)")
+    print("✓ Knjižnice i korisnici inicijalizirani (v9.4.7)")
 
 
 def _startup_init():
@@ -206,11 +206,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Knjižnica API",
     description="REST API za upravljanje knjižnicom — multi-tenant (Opcija A) + Super Admin Panel",
-    version="9.4.6",
+    version="9.4.7",
     lifespan=lifespan,
 )
 
-APP_VERSION = "v9.4.6"
+APP_VERSION = "v9.4.7"
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
 app.add_middleware(

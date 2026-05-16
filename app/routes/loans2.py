@@ -1,22 +1,13 @@
 """
 app/routes/loans.py
-VERZIJA: 9.3.0 — FIX: return_loan koristi joinedload umjesto dict workaround-a
-
-ISPRAVCI:
-  - return_loan: uklonjen pogrešni `return {"id": ..., "is_returned": True}` koji
-    nije odgovarao response_model=LoanOut → uzrokovao 500 ValidationError
-  - return_loan: nakon db.commit() radi novi SELECT s joinedload (book, member)
-    da izbjegne SQLAlchemy lazy load 500 na već zatvorenom scope-u
-  - Uklonjen debug endpoint /debug/list (bio ostavljen u produkciji)
-  - Uklonjen debug endpoint /debug/test (bio ostavljen u produkciji)
-  - create_loan: dodan joinedload pri db.refresh da se izbjegne lazy load na returnu
+VERZIJA: 9.1.4 — Paginacija (PagedResponse) na list endpointu
 """
 import asyncio
 from datetime import date
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, get_library_id, require_staff
 from app.database import get_db
@@ -36,19 +27,6 @@ def _loans_query(db: Session, library_id: Optional[int]):
     return q
 
 
-def _loan_with_relations(db: Session, library_id: Optional[int], loan_id: int) -> Optional[Loan]:
-    """Dohvaća posudbu s joinedload relacijama — izbjegava lazy load 500."""
-    return (
-        _loans_query(db, library_id)
-        .options(
-            joinedload(Loan.book),
-            joinedload(Loan.member),
-        )
-        .filter(Loan.id == loan_id)
-        .first()
-    )
-
-
 @router.get("/", response_model=PagedResponse[LoanOut])
 def get_loans(
     skip: int = Query(0, ge=0),
@@ -66,8 +44,9 @@ def get_loans(
     if active_only:  query = query.filter(Loan.is_returned == False)
     if overdue_only: query = query.filter(Loan.is_returned == False, Loan.due_date < date.today())
     total = query.count()
+    from sqlalchemy.orm import joinedload
     items = query.options(
-        joinedload(Loan.book),
+        joinedload(Loan.book).joinedload(Book.ratings),
         joinedload(Loan.member)
     ).offset(skip).limit(limit).all()
     return PagedResponse.create(items=items, total=total, skip=skip, limit=limit)
@@ -79,7 +58,11 @@ def get_loan(
     library_id: Optional[int] = Depends(get_library_id),
     db: Session = Depends(get_db)
 ):
-    loan = _loan_with_relations(db, library_id, loan_id)
+    from sqlalchemy.orm import joinedload
+    loan = _loans_query(db, library_id).options(
+        joinedload(Loan.book).joinedload(Book.ratings),
+        joinedload(Loan.member)
+    ).filter(Loan.id == loan_id).first()
     if not loan:
         raise HTTPException(status_code=404, detail="Posudba nije pronađena")
     return loan
@@ -112,9 +95,7 @@ async def create_loan(
     db.add(db_loan)
     book.available_copies -= 1
     db.commit()
-
-    # Dohvati s relacijama da izbjegnemo lazy load na returnu
-    db_loan = _loan_with_relations(db, lib_id, db_loan.id)
+    db.refresh(db_loan)
 
     asyncio.create_task(notify_data_update("loan", "created", {"loan_id": db_loan.id}))
     return db_loan
@@ -143,14 +124,9 @@ async def return_loan(
         book.available_copies += 1
 
     db.commit()
-
-    # FIX v9.3.0: nakon commit-a dohvati posudbu s joinedload relacijama.
-    # Prethodni workaround (return {"id": ..., "is_returned": True}) nije
-    # odgovarao response_model=LoanOut i uzrokovao je 500 ValidationError.
-    loan = _loan_with_relations(db, current_user.library_id, loan_id)
-
     asyncio.create_task(notify_data_update("loan", "returned", {"loan_id": loan_id}))
-    return loan
+    # FIX: vraćamo samo potvrdu umjesto cijelog LoanOut (izbjegava lazy load 500)
+    return {"id": loan_id, "is_returned": True}
 
 
 @router.delete("/{loan_id}", status_code=204)
@@ -162,6 +138,7 @@ def delete_loan(
     loan = _loans_query(db, current_user.library_id).filter(Loan.id == loan_id).first()
     if not loan:
         raise HTTPException(status_code=404, detail="Posudba nije pronađena")
+    # BUG-FIX: vrati primjerak knjige ako posudba nije vraćena
     if not loan.is_returned:
         book = db.query(Book).filter(Book.id == loan.book_id).first()
         if book:
