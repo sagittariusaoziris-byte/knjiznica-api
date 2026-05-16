@@ -49,7 +49,9 @@ def get_books(
     if available_only:
         query = query.filter(Book.available_copies > 0)
     total = query.count()
-    items = query.offset(skip).limit(limit).all()
+    # FIX: eager load ratings da izbjegnemo lazy load 500
+    from sqlalchemy.orm import joinedload
+    items = query.options(joinedload(Book.ratings)).offset(skip).limit(limit).all()
     return PagedResponse.create(items=items, total=total, skip=skip, limit=limit)
 
 
@@ -99,7 +101,9 @@ def advanced_search(
     if tags:       query = query.filter(Book.tags.ilike(f"%{tags}%"))
     if available_only: query = query.filter(Book.available_copies > 0)
     total = query.count()
-    items = query.offset(skip).limit(limit).all()
+    # FIX: eager load ratings da izbjegnemo lazy load 500
+    from sqlalchemy.orm import joinedload
+    items = query.options(joinedload(Book.ratings)).offset(skip).limit(limit).all()
     return PagedResponse.create(items=items, total=total, skip=skip, limit=limit)
 
 
